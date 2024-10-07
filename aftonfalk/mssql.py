@@ -120,11 +120,6 @@ class MssqlDriver:
             [f"source.{col}" for col in unique_columns + update_columns]
         )
 
-        # temporary fix because test data
-        source_path = (
-            f"(SELECT * FROM {source_path} where {unique_columns[0]} <> 'NULL')"
-        )
-
         return f"""
             MERGE INTO {destination_path} AS target
             USING {source_path} AS source
