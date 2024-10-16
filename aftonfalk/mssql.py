@@ -1,7 +1,9 @@
 from itertools import batched
 from typing import Any, Iterable, Optional
+from datetime import datetime, timedelta, timezone
 import pyodbc
 import re
+import struct
 
 
 class MssqlDriver:
@@ -31,6 +33,22 @@ class MssqlDriver:
         else:
             raise ValueError("Invalid DSN format")
 
+    def handle_datetimeoffset(self, dto_value):
+        # ref: https://github.com/mkleehammer/pyodbc/issues/134#issuecomment-281739794
+        tup = struct.unpack(
+            "<6hI2h", dto_value
+        )  # e.g., (2017, 3, 16, 10, 35, 18, 500000000, -6, 0)
+        return datetime(
+            tup[0],
+            tup[1],
+            tup[2],
+            tup[3],
+            tup[4],
+            tup[5],
+            tup[6] // 1000,
+            timezone(timedelta(hours=tup[7], minutes=tup[8])),
+        )
+
     def read(
         self,
         query: str,
@@ -48,6 +66,8 @@ class MssqlDriver:
             Generator of dicts
         """
         with pyodbc.connect(self.connection_string) as conn:
+            conn.add_output_converter(-155, self.handle_datetimeoffset)
+
             with conn.cursor() as cursor:
                 if params is not None:
                     cursor.execute(query, params)
@@ -84,7 +104,6 @@ class MssqlDriver:
             data: generator of dicts with the data itself
             batch_size: batches the data into manageable chunks for sql server
         """
-
         with pyodbc.connect(self.connection_string) as conn:
             with conn.cursor() as cursor:
                 for rows in batched((tuple(row.values()) for row in data), batch_size):
@@ -96,40 +115,6 @@ class MssqlDriver:
             with conn.cursor() as cursor:
                 cursor.execute(f"USE {catalog};")
                 cursor.execute(f"CREATE SCHEMA {schema};")
-
-    def merge_ddl(
-        self,
-        source_path: str,
-        destination_path: str,
-        unique_columns: list[str],
-        update_columns: list[str],
-        modified_column: str,
-    ):
-        if not unique_columns or not update_columns:
-            raise ValueError("Unique columns and update columns cannot be empty.")
-
-        on_conditions = (
-            " AND ".join([f"target.{col} = source.{col}" for col in unique_columns])
-            + f" AND source.{modified_column} >= target.{modified_column}"
-        )
-        update_clause = ", ".join(
-            [f"target.{col} = source.{col}" for col in update_columns]
-        )
-        insert_columns = ", ".join(unique_columns + update_columns)
-        insert_values = ", ".join(
-            [f"source.{col}" for col in unique_columns + update_columns]
-        )
-
-        return f"""
-            MERGE INTO {destination_path} AS target
-            USING {source_path} AS source
-            ON {on_conditions}
-            WHEN MATCHED THEN
-                UPDATE SET {update_clause}
-            WHEN NOT MATCHED THEN
-                INSERT ({insert_columns})
-                VALUES ({insert_values});
-        """
 
     def _schema_exists(self, catalog: str, schema: str) -> bool:
         """Create ddl to check if anything exists"""
@@ -185,7 +170,8 @@ class MssqlDriver:
         path: str,
         ddl: str,
     ):
-        """Create table#
+        """Create table. An effort to standardize our landing area.
+
         Parameters:
             Path: where the table would be located
             ddl: the ddl to create the table
@@ -196,6 +182,7 @@ class MssqlDriver:
             return
 
         self._create_schema(catalog=catalog, schema=schema)
+
         self.execute(sql=ddl)
 
     def read_from_source_table(
