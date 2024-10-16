@@ -116,6 +116,46 @@ class MssqlDriver:
                 cursor.execute(f"USE {catalog};")
                 cursor.execute(f"CREATE SCHEMA {schema};")
 
+    def merge_ddl(
+        self,
+        source_path: str,
+        destination_path: str,
+        unique_columns: list[str],
+        update_columns: list[str],
+        modified_column: str,
+    ):
+        if not unique_columns or not update_columns:
+            raise ValueError("Unique columns and update columns cannot be empty.")
+
+        on_conditions = (
+            " AND ".join([f"target.{col} = source.{col}" for col in unique_columns])
+            + f" AND source.{modified_column} >= target.{modified_column}"
+        )
+        update_clause = ", ".join(
+            [f"target.{col} = source.{col}" for col in update_columns]
+        )
+        insert_columns = ", ".join(unique_columns + update_columns)
+        insert_values = ", ".join(
+            [f"source.{col}" for col in unique_columns + update_columns]
+        )
+
+        # temporary fix because test data
+        source_path = (
+            f"(SELECT * FROM {source_path} where {unique_columns[0]} <> 'NULL')"
+        )
+
+        return f"""
+            MERGE INTO {destination_path} AS target
+            USING {source_path} AS source
+            ON {on_conditions}
+            WHEN MATCHED THEN
+                UPDATE SET {update_clause}
+            WHEN NOT MATCHED THEN
+                INSERT ({insert_columns})
+                VALUES ({insert_values});
+        """
+
+
     def _schema_exists(self, catalog: str, schema: str) -> bool:
         """Create ddl to check if anything exists"""
         sql = f"""SELECT
