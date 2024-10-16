@@ -201,7 +201,7 @@ class MssqlDriver:
     def read_from_source_table(
         self,
         path: str,
-        params: tuple,
+        params: Optional[tuple] = (),
         where_clause: Optional[str] = "WHERE 1=1",
     ) -> Iterable[dict]:
         catalog, schema, table = path.split(".")
