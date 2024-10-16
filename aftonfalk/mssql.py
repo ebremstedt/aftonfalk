@@ -185,7 +185,7 @@ class MssqlDriver:
         path: str,
         ddl: str,
     ):
-        """Create table
+        """Create table#
         Parameters:
             Path: where the table would be located
             ddl: the ddl to create the table
