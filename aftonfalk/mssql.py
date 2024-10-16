@@ -123,7 +123,7 @@ class MssqlDriver:
         unique_columns: list[str],
         update_columns: list[str],
         modified_column: str,
-    ):
+    ) -> str:
         if not unique_columns or not update_columns:
             raise ValueError("Unique columns and update columns cannot be empty.")
 
