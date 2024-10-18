@@ -1,12 +1,15 @@
 from aftonfalk.models.types_ import Table, Column, Index
 from aftonfalk.models.enums_ import SqlServerIndexType, SqlServerDataType
 from dataclasses import dataclass
+from typing import Optional
 
 varchar_fifty = SqlServerDataType.VARCHAR.with_length(50)
 
 
 @dataclass
 class RawTable(Table):
+    source_modified_column: Optional[str] = None
+
     def __post_init__(self):
         data_modified_column = Column(
             name="data_modified", data_type="DATETIMEOFFSET", constraints="NOT NULL"
