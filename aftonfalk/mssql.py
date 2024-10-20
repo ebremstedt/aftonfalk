@@ -1,6 +1,7 @@
 from itertools import batched
 from typing import Any, Iterable, Optional
 from datetime import datetime, timedelta, timezone
+from pendulum import now
 import pyodbc
 import re
 import struct
@@ -139,11 +140,6 @@ class MssqlDriver:
             [f"source.{col}" for col in unique_columns + update_columns]
         )
 
-        # temporary fix because test data
-        source_path = (
-            f"(SELECT * FROM {source_path} where {unique_columns[0]} <> 'NULL')"
-        )
-
         return f"""
             MERGE INTO {destination_path} AS target
             USING {source_path} AS source
@@ -236,3 +232,53 @@ class MssqlDriver:
         source_query = f"SELECT * FROM [{catalog}].[{schema}].[{table}] {where_clause}"
 
         return self.read(query=source_query, params=params)
+
+
+    def merge(
+        self,
+        destination_path: str,
+        temp_table_path: str,
+        table_ddl: str,
+        insert_sql: str,
+        unique_columns: list[str],
+        update_columns: list[str],
+        modified_column: str,
+        data: Iterable[list],
+    ):
+        """
+        Creates destination schema + table if it does not already exist.
+        Creates temporary and equivalent table to which data is inserted to.
+        Data is then merged to destination table, and the temporary table is deleted.
+
+        Parameters:
+            destination_path: where you want the table to end up. formatted like catalog.schema.table
+            temp_table_path: where you want the temporary table to end up (and deleted)
+            table_ddl: definition of the table you want to create
+            insert_sql: insert statement to the table you want to insert to
+            unique_columns: list of columns which tells the merge statement what to join on when merging
+            update_coluns: list of columns which tells the merge statment which columns to update
+            modified_column: when comparing source vs destination rows, choose the latest one
+            data: the data itself
+        """
+        self.create_table(ddl=table_ddl)
+
+        temp_table_path = f"{temp_table_path}_{now().format('YYMMDDHHmmss')}"
+
+        self.create_table(
+            ddl=table_ddl,
+            path=temp_table_path,
+        )
+
+        self.write(sql=insert_sql, data=data)
+
+        merge_sql = self.merge_ddl(
+            source_path=temp_table_path,
+            destination_path=destination_path,
+            unique_columns=unique_columns,
+            update_columns=update_columns,
+            modified_column=modified_column,
+        )
+
+        self.execute(sql=merge_sql)
+
+        self.execute(sql=f"DROP TABLE {temp_table_path};")
