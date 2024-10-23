@@ -55,6 +55,7 @@ class MssqlDriver:
         query: str,
         params: Optional[tuple] = None,
         batch_size: Optional[int] = 100,
+        catalog: Optional[str] = None
     ) -> Iterable[dict]:
         """Read data from database
 
@@ -62,6 +63,7 @@ class MssqlDriver:
             query: the query to run
             params: any params you might wish to use in the query
             batch_size: divide total read into smaller batches
+            catalog: Useful when queries need a catalog context, such as when querying the INFORMATION_SCHEMA tables
 
         returns:
             Generator of dicts
@@ -70,6 +72,8 @@ class MssqlDriver:
             conn.add_output_converter(-155, self.handle_datetimeoffset)
 
             with conn.cursor() as cursor:
+                if catalog is not None:
+                    cursor.execute(f"USE {catalog};")
                 if params is not None:
                     cursor.execute(query, params)
                 else:
