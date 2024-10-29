@@ -9,10 +9,16 @@ import struct
 
 class MssqlDriver:
     def __init__(
-        self, dsn: str, driver: Optional[str] = "ODBC Driver 18 for SQL Server"
+        self,
+        dsn: str,
+        driver: Optional[str] = "ODBC Driver 18 for SQL Server",
+        trust_server_certificate: bool = True,
+        encrypt: bool = False
     ):
         self.dsn = dsn
         self.driver = driver
+        self.trust_server_certificate = trust_server_certificate
+        self.encrypt = encrypt
         self.connection_string = self._connection_string()
 
     def _connection_string(self) -> str:
@@ -30,7 +36,15 @@ class MssqlDriver:
             password = match.group("password")
             hostname = match.group("hostname")
             port = match.group("port")
-            return f"DRIVER={self.driver};SERVER={hostname},{port};UID={user};PWD={password};TrustServerCertificate=yes;"
+            trust_server_certificate_str = ""
+            if self.trust_server_certificate:
+                trust_server_certificate_str = "TrustServerCertificate=yes;"
+
+            encrypt_str = ""
+            if not self.encrypt:
+                encrypt_str = "Encrypt=no;"
+
+            return f"DRIVER={self.driver};SERVER={hostname},{port};UID={user};PWD={password};{trust_server_certificate_str}{encrypt_str}"
         else:
             raise ValueError("Invalid DSN format")
 
