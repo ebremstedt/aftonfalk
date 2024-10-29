@@ -209,17 +209,21 @@ class MssqlDriver:
         self,
         path: str,
         ddl: str,
+        drop_first: Optional[bool] = False
     ):
         """Create table. An effort to standardize our landing area.
 
         Parameters:
             Path: where the table would be located
             ddl: the ddl to create the table
+            drop_first: do you want to drop the table before creating it
         """
         catalog, schema, table = path.split(".")
 
         if self._table_exists(catalog=catalog, schema=schema, table_name=table):
-            return
+            if not drop_first:
+                return
+            self.execute(sql=f"DROP TABLE {path};")
 
         self._create_schema(catalog=catalog, schema=schema)
 
@@ -248,6 +252,7 @@ class MssqlDriver:
         update_columns: list[str],
         modified_column: str,
         data: Iterable[list],
+        drop_destination_first: Optional[bool] = False,
     ):
         """
         Creates destination schema + table if it does not already exist.
@@ -263,8 +268,13 @@ class MssqlDriver:
             update_coluns: list of columns which tells the merge statment which columns to update
             modified_column: when comparing source vs destination rows, choose the latest one
             data: the data itself
+            drop_destination_first: whether you want to drop the destination before creating table
         """
-        self.create_table(ddl=table_ddl)
+        self.create_table(
+            ddl=table_ddl,
+            path=destination_path,
+            drop_first=drop_destination_first
+        )
 
         temp_table_path = f"{temp_table_path}_{now().format('YYMMDDHHmmss')}"
 
