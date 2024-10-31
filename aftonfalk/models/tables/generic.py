@@ -4,8 +4,8 @@ from aftonfalk.models.types_ import Table, Column
 
 @dataclass
 class Generic(Table):
-    source_path: str
-    destination_path: str
+    destination_path: str = None
+    source_sql: str = None
 
     def __post_init__(self):
         self.default_columns = [
@@ -18,21 +18,16 @@ class Generic(Table):
 
         super().set_default_attributes()
 
-    def table_ddl(self, path: str) -> str:
+    def table_ddl(self) -> str:
         columns_def = [col.column_definition() for col in self._columns]
-        indexes_sql = "\n".join(index.to_sql(path) for index in self.indexes)
+        indexes_sql = "\n".join(index.to_sql(self.destination_path) for index in self.indexes)
 
         return (
-            f"CREATE TABLE {path} (\n  " + ",\n  ".join(columns_def) + ","
+            f"CREATE TABLE {self.destination_path} (\n  " + ",\n  ".join(columns_def) + ","
             "\n);\n" + indexes_sql
         )
 
-    def insert_sql(self, path: str) -> str:
+    def insert_sql(self) -> str:
         column_names = ", ".join([col.name for col in self._columns])
         placeholders = ", ".join(["?"] * len(self._columns))
-        return f"INSERT INTO {path} ({column_names}) VALUES ({placeholders});"
-
-
-    def read_sql() -> str:
-        """ This is empty by design and should be replaced """
-        pass
+        return f"INSERT INTO {self.destination_path} ({column_names}) VALUES ({placeholders});"
