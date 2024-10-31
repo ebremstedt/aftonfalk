@@ -3,8 +3,8 @@ from typing import Any, Iterable, Optional
 from datetime import datetime, timedelta, timezone
 from pendulum import now
 import pyodbc
-import re
 import struct
+from urllib.parse import urlparse, unquote
 
 
 class MssqlDriver:
@@ -21,32 +21,27 @@ class MssqlDriver:
         self.encrypt = encrypt
         self.connection_string = self._connection_string()
 
+
     def _connection_string(self) -> str:
-        pattern = re.compile(
-            r"^(?P<technology>[a-zA-Z]+)://"
-            r"(?P<user>[^\:]+):"
-            r"(?P<password>[^\@]+)@"
-            r"(?P<hostname>[^:]+):"
-            r"(?P<port>[0-9]+)$"
-        )
+        parsed = urlparse(self.dsn)
+        technology = parsed.scheme
+        user = unquote(parsed.username) if parsed.username else None
+        password = unquote(parsed.password) if parsed.password else None
+        hostname = parsed.hostname
+        port = parsed.port
 
-        match = pattern.match(self.dsn)
-        if match:
-            user = match.group("user")
-            password = match.group("password")
-            hostname = match.group("hostname")
-            port = match.group("port")
-            trust_server_certificate_str = ""
-            if self.trust_server_certificate:
-                trust_server_certificate_str = "TrustServerCertificate=yes;"
+        trust_server_certificate_str = ""
+        if self.trust_server_certificate:
+            trust_server_certificate_str = "TrustServerCertificate=yes;"
 
-            encrypt_str = ""
-            if not self.encrypt:
-                encrypt_str = "Encrypt=no;"
+        encrypt_str = ""
+        if not self.encrypt:
+            encrypt_str = "Encrypt=no;"
 
             return f"DRIVER={self.driver};SERVER={hostname},{port};UID={user};PWD={password};{trust_server_certificate_str}{encrypt_str}"
         else:
             raise ValueError("Invalid DSN format")
+
 
     def handle_datetimeoffset(self, dto_value):
         # ref: https://github.com/mkleehammer/pyodbc/issues/134#issuecomment-281739794
