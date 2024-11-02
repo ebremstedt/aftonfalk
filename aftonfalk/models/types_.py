@@ -137,7 +137,7 @@ class Table:
         sql.append(f"FROM {self.source_path}")
 
         if incremental:
-            sql.append(f"WHERE '{since}' < {self.source_data_modified_column_name} AND {self.source_data_modified_column_name} > '{until}'")
+            sql.append(f"WHERE '{since}' <= {self.source_data_modified_column_name} AND {self.source_data_modified_column_name} > '{until}'")
 
         sql_string = "\n".join(sql)
 
