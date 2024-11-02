@@ -35,6 +35,12 @@ class Index:
 
 @dataclass
 class Table:
+    source_path: str
+    destination_path: str
+    metadata_modified_field_enabled: bool = True
+    data_modified_field_enabled: bool = False
+    source_data_modified_column_name: str = None
+    source_data_modified_column_format: str = "YYYY-MM-DD HH:mm:ss.SSS"
     default_columns: Optional[list[Column]] = field(default_factory=list)
     unique_columns: Optional[list[Column]] = field(default_factory=list)
     non_unique_columns: Optional[list[Column]] = field(default_factory=list)
@@ -42,32 +48,100 @@ class Table:
     indexes: Optional[list[Index]] = field(default_factory=list)
 
     _columns: list[Column] = None
-    default_columns_str_comma: Optional[str] = None
-    unique_columns_str_comma: Optional[str] = None
-    non_unique_columns_str_comma: Optional[str] = None
-    sensitive_columns_str_comma: Optional[str] = None
-    default_columns_str_underscore: Optional[str] = None
-    unique_columns_str_underscore: Optional[str] = None
-    non_unique_columns_str_underscore: Optional[str] = None
-    sensitive_columns_str_comma: Optional[str] = None
 
     def create_column_list(self):
         non_default_columns = self.unique_columns + self.non_unique_columns
         self._columns = self.default_columns + non_default_columns
 
-    def str_comma(self, input_list: list[Column]):
-        if len(input_list) == 0:
-            return ""
-        return ",".join([col.name for col in input_list])
-
-    def str_underscore(self, input_list: list[Column]):
-        if len(input_list) == 0:
-            return ""
-        return "_".join([col.name for col in input_list])
-
-    def set_default_attributes(self):
-        self.create_column_list()
-        self.default_columns_str_comma
-
     def __post_init__(self):
-        self.set_default_attributes()
+        data_modified = Column(
+            name="data_modified", data_type="DATETIMEOFFSET", constraints="NOT NULL"
+        )
+        metadata_modified = Column(
+                name="metadata_modified",
+                data_type="DATETIMEOFFSET",
+                constraints="NOT NULL",
+            )
+
+        if self.metadata_modified_field_enabled:
+            self.default_columns.append(
+                metadata_modified
+            )
+
+        if self.data_modified_field_enabled:
+            self.default_columns.append(
+                data_modified
+            )
+            self.indexes = [
+                Index(
+                    name="data_modified_nc",
+                    index_type=SqlServerIndexType.NONCLUSTERED,
+                    columns=[data_modified],
+                )
+            ]
+
+        self.create_column_list()
+
+    def table_ddl(self) -> str:
+        columns_def = [col.column_definition() for col in self._columns]
+        indexes_sql = "\n".join(index.to_sql(self.destination_path) for index in self.indexes)
+
+        ddl = (
+            f"CREATE TABLE {self.destination_path} (\n  " + ",\n  ".join(columns_def) + ","
+            "\n);\n" + indexes_sql
+        )
+
+        print("The ddl that will run:\n")
+        print(ddl + "\n")
+
+        return ddl
+
+    def insert_sql(self) -> str:
+        column_names = ", ".join([col.name for col in self._columns])
+        placeholders = ", ".join(["?"] * len(self._columns))
+        return f"INSERT INTO {self.destination_path} ({column_names}) VALUES ({placeholders});"
+
+
+    def read_sql(
+        self,
+        incremental: bool = False,
+        since: str = "",
+        until: str = ""
+    ) -> str:
+        """
+        Consider overwriting this function to fit your needs.
+
+        Params:
+            incremental: adds where clause to get a subset of rows
+            since: format needs to match source
+            until: format needs to match source
+
+
+        """
+        sql = []
+        select = "SELECT"
+        sql.append(select)
+
+        fields = []
+
+        if self.metadata_modified_field_enabled:
+            fields.append("SYSDATETIMEOFFSET() as metadata_modified")
+
+        if self.data_modified_field_enabled:
+            fields.append(f"{self.source_data_modified_column_name} as data_modified")
+
+        fields.append("*")
+
+        sql.append(",\n".join(fields))
+
+        sql.append(f"FROM {self.source_path}")
+
+        if incremental:
+            sql.append(f"WHERE '{since}' < {self.source_data_modified_column_name} AND {self.source_data_modified_column_name} > '{until}'")
+
+        sql_string = "\n".join(sql)
+
+        print("The query that will run:\n")
+        print(sql_string + "\n")
+
+        return sql_string
