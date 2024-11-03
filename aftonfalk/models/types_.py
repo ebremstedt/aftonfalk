@@ -1,6 +1,12 @@
 from dataclasses import dataclass, field
 from typing import Optional
-from aftonfalk.models.enums_ import SqlServerIndexType, SortDirection
+from aftonfalk.models.enums_ import SqlServerIndexType, SortDirection, SqlServerTimeZone
+import re
+from pendulum import now
+
+
+class InvalidPathException(Exception):
+    pass
 
 
 @dataclass
@@ -37,10 +43,10 @@ class Index:
 class Table:
     source_path: str
     destination_path: str
-    metadata_modified_field_enabled: bool = True
-    data_modified_field_enabled: bool = False
     source_data_modified_column_name: str = None
-    source_data_modified_column_format: str = "YYYY-MM-DD HH:mm:ss.SSS"
+    enforce_primary_key: bool = False
+    timezone: SqlServerTimeZone = SqlServerTimeZone.UTC
+
     default_columns: Optional[list[Column]] = field(default_factory=list)
     unique_columns: Optional[list[Column]] = field(default_factory=list)
     non_unique_columns: Optional[list[Column]] = field(default_factory=list)
@@ -53,46 +59,49 @@ class Table:
         non_default_columns = self.unique_columns + self.non_unique_columns
         self._columns = self.default_columns + non_default_columns
 
+    def path_is_valid(self, string: str) -> bool:
+        pattern = r'^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+){2}$'
+
+        if re.match(pattern, string):
+            return True
+        return False
+
     def __post_init__(self):
-        data_modified = Column(
-            name="data_modified", data_type="DATETIMEOFFSET", constraints="NOT NULL"
-        )
-        metadata_modified = Column(
-                name="metadata_modified",
-                data_type="DATETIMEOFFSET",
-                constraints="NOT NULL",
-            )
-
-        if self.metadata_modified_field_enabled:
-            self.default_columns.append(
-                metadata_modified
-            )
-
-        if self.data_modified_field_enabled:
-            self.default_columns.append(
-                data_modified
-            )
-            self.indexes = [
-                Index(
-                    name="data_modified_nc",
-                    index_type=SqlServerIndexType.NONCLUSTERED,
-                    columns=[data_modified],
-                )
-            ]
+        if not self.path_is_valid(string=self.destination_path) or not self.path_is_valid(string=self.source_path):
+            raise InvalidPathException("Path must be formatted like <database>.<schema>.<table>")
 
         self.create_column_list()
+
+    def join_columns_by(self, columns: list[Column], separator: str = ","):
+        if len(columns) == 0:
+            return ""
+        return separator.join([col.name for col in columns])
 
     def table_ddl(self) -> str:
         columns_def = [col.column_definition() for col in self._columns]
         indexes_sql = "\n".join(index.to_sql(self.destination_path) for index in self.indexes)
 
+        ddl_parts = []
+
+        ddl_parts.append(f"CREATE TABLE {self.destination_path} (")
+
+        ddl_parts.append(",\n  ".join(columns_def))
+
+        if self.enforce_primary_key:
+            pk_name = "_".join(col.name for col in self.unique_columns)
+            pk_definition = ", ".join(col.name for col in self.unique_columns)
+            ddl_parts.append(f"CONSTRAINT PK_{pk_name}_{now().format("YYMMDDHHmmss")} PRIMARY KEY ({pk_definition})")
+
+        ddl_parts.append(");")
+
+        ddl_parts.append(indexes_sql)
+
+        ddl = "\n".join(ddl_parts)
+
         ddl = (
             f"CREATE TABLE {self.destination_path} (\n  " + ",\n  ".join(columns_def) + ","
             "\n);\n" + indexes_sql
         )
-
-        print("The ddl that will run:\n")
-        print(ddl + "\n")
 
         return ddl
 
@@ -104,44 +113,42 @@ class Table:
 
     def read_sql(
         self,
-        incremental: bool = False,
-        since: str = "",
-        until: str = ""
+        since: Optional[str] = None,
+        until: Optional[str] = None
     ) -> str:
         """
+        Construct a read sql statement.
         Consider overwriting this function to fit your needs.
 
         Params:
-            incremental: adds where clause to get a subset of rows
             since: format needs to match source
             until: format needs to match source
 
-
+        Returns:
+            str
         """
-        sql = []
-        select = "SELECT"
-        sql.append(select)
+        sql = ["SELECT"]
 
         fields = []
-
-        if self.metadata_modified_field_enabled:
-            fields.append("SYSDATETIMEOFFSET() as metadata_modified")
-
-        if self.data_modified_field_enabled:
-            fields.append(f"{self.source_data_modified_column_name} as data_modified")
-
+        tz_info = f"AT TIME ZONE '{self.timezone.name}'"
+        fields.append(f"SYSDATETIMEOFFSET() {tz_info} as metadata_modified")
+        if self.source_data_modified_column_name:
+            fields.append(f"""CAST({self.source_data_modified_column_name} AS DATETIME) {tz_info} AS data_modified""")
         fields.append("*")
-
         sql.append(",\n".join(fields))
 
         sql.append(f"FROM {self.source_path}")
 
-        if incremental:
-            sql.append(f"WHERE '{since}' <= {self.source_data_modified_column_name} AND {self.source_data_modified_column_name} > '{until}'")
+        if since and until:
+            sql.append(f"WHERE '{since}' <= {self.source_data_modified_column_name} AND {self.source_data_modified_column_name} < '{until}'")
 
         sql_string = "\n".join(sql)
 
-        print("The query that will run:\n")
-        print(sql_string + "\n")
-
         return sql_string
+
+
+    def has_sensitive_columns(self) -> bool:
+        for column in self._columns:
+            if column.sensitive:
+                return True
+        return False
