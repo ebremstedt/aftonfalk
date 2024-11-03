@@ -1,6 +1,12 @@
 from dataclasses import dataclass, field
 from typing import Optional
-from aftonfalk.models.enums_ import SqlServerIndexType, SortDirection
+from aftonfalk.models.enums_ import SqlServerIndexType, SortDirection, SqlServerTimeZone
+import re
+from pendulum import now
+
+
+class InvalidPathException(Exception):
+    pass
 
 
 @dataclass
@@ -35,6 +41,12 @@ class Index:
 
 @dataclass
 class Table:
+    source_path: str
+    destination_path: str
+    source_data_modified_column_name: str = None
+    enforce_primary_key: bool = False
+    timezone: SqlServerTimeZone = SqlServerTimeZone.UTC
+
     default_columns: Optional[list[Column]] = field(default_factory=list)
     unique_columns: Optional[list[Column]] = field(default_factory=list)
     non_unique_columns: Optional[list[Column]] = field(default_factory=list)
@@ -42,32 +54,101 @@ class Table:
     indexes: Optional[list[Index]] = field(default_factory=list)
 
     _columns: list[Column] = None
-    default_columns_str_comma: Optional[str] = None
-    unique_columns_str_comma: Optional[str] = None
-    non_unique_columns_str_comma: Optional[str] = None
-    sensitive_columns_str_comma: Optional[str] = None
-    default_columns_str_underscore: Optional[str] = None
-    unique_columns_str_underscore: Optional[str] = None
-    non_unique_columns_str_underscore: Optional[str] = None
-    sensitive_columns_str_comma: Optional[str] = None
 
     def create_column_list(self):
         non_default_columns = self.unique_columns + self.non_unique_columns
         self._columns = self.default_columns + non_default_columns
 
-    def str_comma(self, input_list: list[Column]):
-        if len(input_list) == 0:
-            return ""
-        return ",".join([col.name for col in input_list])
+    def path_is_valid(self, string: str) -> bool:
+        pattern = r'^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+){2}$'
 
-    def str_underscore(self, input_list: list[Column]):
-        if len(input_list) == 0:
-            return ""
-        return "_".join([col.name for col in input_list])
-
-    def set_default_attributes(self):
-        self.create_column_list()
-        self.default_columns_str_comma
+        if re.match(pattern, string):
+            return True
+        return False
 
     def __post_init__(self):
-        self.set_default_attributes()
+        if not self.path_is_valid(string=self.destination_path) or not self.path_is_valid(string=self.source_path):
+            raise InvalidPathException("Path must be formatted like <database>.<schema>.<table>")
+
+        self.create_column_list()
+
+    def join_columns_by(self, columns: list[Column], separator: str = ","):
+        if len(columns) == 0:
+            return ""
+        return separator.join([col.name for col in columns])
+
+    def table_ddl(self) -> str:
+        columns_def = [col.column_definition() for col in self._columns]
+        indexes_sql = "\n".join(index.to_sql(self.destination_path) for index in self.indexes)
+
+        ddl_parts = []
+
+        ddl_parts.append(f"CREATE TABLE {self.destination_path} (")
+
+        ddl_parts.append(",\n  ".join(columns_def))
+
+        if self.enforce_primary_key:
+            pk_name = "_".join(col.name for col in self.unique_columns)
+            pk_definition = ", ".join(col.name for col in self.unique_columns)
+            ddl_parts.append(f"CONSTRAINT PK_{pk_name}_{now().format("YYMMDDHHmmss")} PRIMARY KEY ({pk_definition})")
+
+        ddl_parts.append(");")
+
+        ddl_parts.append(indexes_sql)
+
+        ddl = "\n".join(ddl_parts)
+
+        ddl = (
+            f"CREATE TABLE {self.destination_path} (\n  " + ",\n  ".join(columns_def) + ","
+            "\n);\n" + indexes_sql
+        )
+
+        return ddl
+
+    def insert_sql(self) -> str:
+        column_names = ", ".join([col.name for col in self._columns])
+        placeholders = ", ".join(["?"] * len(self._columns))
+        return f"INSERT INTO {self.destination_path} ({column_names}) VALUES ({placeholders});"
+
+
+    def read_sql(
+        self,
+        since: Optional[str] = None,
+        until: Optional[str] = None
+    ) -> str:
+        """
+        Construct a read sql statement.
+        Consider overwriting this function to fit your needs.
+
+        Params:
+            since: format needs to match source
+            until: format needs to match source
+
+        Returns:
+            str
+        """
+        sql = ["SELECT"]
+
+        fields = []
+        tz_info = f"AT TIME ZONE '{self.timezone.name}'"
+        fields.append(f"SYSDATETIMEOFFSET() {tz_info} as metadata_modified")
+        if self.source_data_modified_column_name:
+            fields.append(f"""CAST({self.source_data_modified_column_name} AS DATETIME) {tz_info} AS data_modified""")
+        fields.append("*")
+        sql.append(",\n".join(fields))
+
+        sql.append(f"FROM {self.source_path}")
+
+        if since and until:
+            sql.append(f"WHERE '{since}' <= {self.source_data_modified_column_name} AND {self.source_data_modified_column_name} < '{until}'")
+
+        sql_string = "\n".join(sql)
+
+        return sql_string
+
+
+    def has_sensitive_columns(self) -> bool:
+        for column in self._columns:
+            if column.sensitive:
+                return True
+        return False

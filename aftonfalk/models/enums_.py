@@ -24,37 +24,36 @@ class SqlServerDataType(Enum):
     SqlServerDataType.DATETIME2.with_precision(3) # Output: DATETIME2(3)
     """
 
-    TINYINT = auto()
-    SMALLINT = auto()
-    INT = auto()
     BIGINT = auto()
-    FLOAT = auto()
-    REAL = auto()
-    DECIMAL = auto()
-    NUMERIC = auto()
-    MONEY = auto()
-    SMALLMONEY = auto()
-    CHAR = auto()
-    VARCHAR = auto()
-    TEXT = auto()
-    NCHAR = auto()
-    NVARCHAR = auto()
-    NTEXT = auto()
     BINARY = auto()
-    VARBINARY = auto()
-    IMAGE = auto()
+    CHAR = auto()
+    CURSOR = auto()
     DATE = auto()
     DATETIME = auto()
     DATETIME2 = auto()
     DATETIMEOFFSET = auto()
-    SMALLDATETIME = auto()
-    TIME = auto()
-    UNIQUEIDENTIFIER = auto()
-    XML = auto()
-    CURSOR = auto()
-    TABLE = auto()
-    GEOMETRY = auto()
+    DECIMAL = auto()
+    FLOAT = auto()
     GEOGRAPHY = auto()
+    GEOMETRY = auto()
+    IMAGE = auto()
+    INT = auto()
+    MONEY = auto()
+    NCHAR = auto()
+    NUMERIC = auto()
+    NVARCHAR = auto()
+    REAL = auto()
+    SMALLDATETIME = auto()
+    SMALLINT = auto()
+    SMALLMONEY = auto()
+    TABLE = auto()
+    TIME = auto()
+    TINYINT = auto()
+    UNIQUEIDENTIFIER = auto()
+    VARBINARY = auto()
+    VARCHAR = auto()
+    XML = auto()
+
 
     def with_length(self, length: int) -> str:
         """Return the data type with a specified length."""
@@ -65,3 +64,8 @@ class SqlServerDataType(Enum):
         if scale is not None:
             return f"{self.name}({precision}, {scale})"
         return f"{self.name}({precision})"
+
+
+class SqlServerTimeZone(Enum):
+    UTC = "UTC"
+    CENTRAL_EUROPEAN_STANDARD_TIME = "Central European Standard Time"
