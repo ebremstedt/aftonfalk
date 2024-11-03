@@ -34,35 +34,57 @@ Manage tables.
 
 ```python
 from aftonfalk.models.enums_ import SqlServerDataType
-from aftonfalk.models.types_ import Column
-from aftonfalk.models.tables.clean import RawTable
+from aftonfalk.models.types_ import Column, Table, Index
+from aftonfalk.models.enums_ import SqlServerIndexType
 
-raw_table = RawTable(
-    unique_columns=[
-        Column(
-            name="unique_key",
-            data_type=SqlServerDataType.NVARCHAR.with_length(50),
-            constraints="NOT NULL",
-        ),
-    ]
-)
+source_database = "source_database"
+source_schema = "source_schema"
+destination_database = "destination_database"
+destination_schema = "destination_schema"
+
+DATA_MODIFIED = Column(name="data_modified", data_type="DATETIMEOFFSET", constraints="NOT NULL")
+
+DEFAULT_COLUMNS = [
+    Column(name="metadata_modified", data_type="DATETIMEOFFSET", constraints="NOT NULL"),
+    DATA_MODIFIED,
+    Column(name="data", data_type="NVARCHAR(MAX)", constraints="NOT NULL"),
+]
+INDEXES = [
+    Index(
+        name="data_modified_nc",
+        index_type=SqlServerIndexType.NONCLUSTERED,
+        columns=[DATA_MODIFIED],
+    )
+]
+
+tables = {
+    "table": Table(
+        source_path=f"{source_database}.{source_schema}.table",
+        destination_path=f"{destination_database}.{destination_schema}.table",
+        source_data_modified_column_name="credat",
+        default_columns=DEFAULT_COLUMNS,
+        unique_columns=[
+            Column(
+                name="table_code",
+                data_type=SqlServerDataType.NVARCHAR.with_length(50),
+                constraints="NOT NULL",
+            )
+        ],
+        indexes=INDEXES
+    )
+}
 ```
 
 then you can do things like easily:
 
 creating tables
 ``` python
-path = "catalog.schema.table"
-ddl = raw_table.table_ddl(path=path)
-driver.create_table(path=path, ddl=ddl)
+ddl = table.table_ddl()
+driver.create_table(path=table.destination_path, ddl=table.table_ddl())
 ```
 
 inserting into tables
 ```python
 data = ...
-path = "catalog.schema.table"
-insert_stmt = raw_table.insert_sql(path=path)
-driver.write(sql=insert_stmt, data=data)
+driver.write(sql=table.insert_sql(), data=data)
 ```
-
-## Notes
