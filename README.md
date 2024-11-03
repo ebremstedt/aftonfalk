@@ -79,7 +79,6 @@ then you can do things like easily:
 
 creating tables
 ``` python
-ddl = table.table_ddl()
 driver.create_table(path=table.destination_path, ddl=table.table_ddl())
 ```
 
