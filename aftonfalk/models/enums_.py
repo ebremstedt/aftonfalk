@@ -17,6 +17,12 @@ class SortDirection(Enum):
     DESC = "DESC"
 
 
+class WriteMode(Enum):
+    TRUNCATE_WRITE = auto()
+    APPEND = auto()
+    MERGE = auto()
+
+
 class SqlServerDataType(Enum):
     """
     SqlServerDataType.VARCHAR.with_length(255) # Output: VARCHAR(255)
@@ -53,7 +59,6 @@ class SqlServerDataType(Enum):
     VARBINARY = auto()
     VARCHAR = auto()
     XML = auto()
-
 
     def with_length(self, length: int) -> str:
         """Return the data type with a specified length."""
