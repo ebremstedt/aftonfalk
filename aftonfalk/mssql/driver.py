@@ -13,14 +13,13 @@ class MssqlDriver:
         dsn: str,
         driver: Optional[str] = "ODBC Driver 18 for SQL Server",
         trust_server_certificate: bool = True,
-        encrypt: bool = False
+        encrypt: bool = False,
     ):
         self.dsn = dsn
         self.driver = driver
         self.trust_server_certificate = trust_server_certificate
         self.encrypt = encrypt
         self.connection_string = self._connection_string()
-
 
     def _connection_string(self) -> str:
         parsed = urlparse(self.dsn)
@@ -41,7 +40,6 @@ class MssqlDriver:
             return f"DRIVER={self.driver};SERVER={hostname},{port};UID={user};PWD={password};{trust_server_certificate_str}{encrypt_str}"
         else:
             raise ValueError("Invalid DSN format")
-
 
     def handle_datetimeoffset(self, dto_value):
         # ref: https://github.com/mkleehammer/pyodbc/issues/134#issuecomment-281739794
@@ -64,7 +62,7 @@ class MssqlDriver:
         query: str,
         params: Optional[tuple] = None,
         batch_size: Optional[int] = 100,
-        catalog: Optional[str] = None
+        catalog: Optional[str] = None,
     ) -> Iterable[dict]:
         """Read data from database
 
@@ -164,7 +162,6 @@ class MssqlDriver:
                 VALUES ({insert_values});
         """
 
-
     def _schema_exists(self, catalog: str, schema: str) -> bool:
         """Create ddl to check if anything exists"""
         sql = f"""SELECT
@@ -214,12 +211,7 @@ class MssqlDriver:
         if not self._schema_exists(catalog=catalog, schema=schema):
             self.create_schema_in_one_go(catalog=catalog, schema=schema)
 
-    def create_table(
-        self,
-        path: str,
-        ddl: str,
-        drop_first: Optional[bool] = False
-    ):
+    def create_table(self, path: str, ddl: str, drop_first: Optional[bool] = False):
         """Create table. An effort to standardize our landing area.
 
         Parameters:
@@ -238,18 +230,25 @@ class MssqlDriver:
 
         self.execute(sql=ddl)
 
-    def read_from_source_table(
+    def truncate_write(
         self,
-        path: str,
-        params: Optional[tuple] = (),
-        where_clause: Optional[str] = "WHERE 1=1",
-    ) -> Iterable[dict]:
-        catalog, schema, table = path.split(".")
+        destination_path: str,
+        table_ddl: str,
+        data: Iterable[dict],
+        insert_sql: str,
+    ):
+        self.create_table(path=destination_path, ddl=table_ddl, drop_first=True)
+        self.write(sql=insert_sql, data=data)
 
-        source_query = f"SELECT * FROM [{catalog}].[{schema}].[{table}] {where_clause}"
-
-        return self.read(query=source_query, params=params)
-
+    def append(
+        self,
+        destination_path: str,
+        table_ddl: str,
+        data: Iterable[dict],
+        insert_sql: str,
+    ):
+        self.create_table(path=destination_path, ddl=table_ddl, drop_first=False)
+        self.write(sql=insert_sql, data=data)
 
     def merge(
         self,
@@ -280,9 +279,7 @@ class MssqlDriver:
             drop_destination_first: whether you want to drop the destination before creating table
         """
         self.create_table(
-            ddl=table_ddl,
-            path=destination_path,
-            drop_first=drop_destination_first
+            ddl=table_ddl, path=destination_path, drop_first=drop_destination_first
         )
 
         temp_table_path = f"{temp_table_path}_{now().format('YYMMDDHHmmss')}"
