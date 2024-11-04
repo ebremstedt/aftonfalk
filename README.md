@@ -33,14 +33,16 @@ driver.write(sql="INSERT INTO tablex (column_name) VALUES ('column_value')", dat
 Manage tables.
 
 ```python
-from aftonfalk.models.enums_ import SqlServerDataType
-from aftonfalk.models.types_ import Column, Table, Index
-from aftonfalk.models.enums_ import SqlServerIndexType
+from aftonfalk.mssql.enums_ import SqlServerDataType, SqlServerIndexType, SqlServerTimeZone
+from aftonfalk.mssql.types_ import Column, Table, Index
+
 
 source_database = "source_database"
 source_schema = "source_schema"
 destination_database = "destination_database"
 destination_schema = "destination_schema"
+
+TIMEZONE = SqlServerTimeZone.CENTRAL_EUROPEAN_STANDARD_TIME
 
 DATA_MODIFIED = Column(name="data_modified", data_type="DATETIMEOFFSET", constraints="NOT NULL")
 
@@ -62,6 +64,7 @@ tables = {
         source_path=f"{source_database}.{source_schema}.table",
         destination_path=f"{destination_database}.{destination_schema}.table",
         source_data_modified_column_name="credat",
+        timezone=TIMEZONE,
         default_columns=DEFAULT_COLUMNS,
         unique_columns=[
             Column(

@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional
-from aftonfalk.models.enums_ import (
+from aftonfalk.mssql.enums_ import (
     SqlServerIndexType,
     SortDirection,
     SqlServerTimeZone,
@@ -162,7 +162,7 @@ class Table:
         sql = ["SELECT"]
 
         fields = []
-        tz_info = f"AT TIME ZONE '{self.timezone.name}'"
+        tz_info = f"AT TIME ZONE '{self.timezone.value}'"
         fields.append(f"SYSDATETIMEOFFSET() {tz_info} as metadata_modified")
         if self.source_data_modified_column_name:
             fields.append(
