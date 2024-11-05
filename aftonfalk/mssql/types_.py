@@ -147,7 +147,12 @@ class Table:
         placeholders = ", ".join(["?"] * len(self._columns))
         return f"INSERT INTO {self.destination_path} ({column_names}) VALUES ({placeholders});"
 
-    def read_sql(self, since: Optional[str] = None, until: Optional[str] = None) -> str:
+    def read_sql(
+        self,
+        since: Optional[str] = None,
+        until: Optional[str] = None,
+        explicitly_read_columns: list[Column] = None,
+    ) -> str:
         """
         Construct a read sql statement.
         Consider overwriting this function to fit your needs.
@@ -168,7 +173,19 @@ class Table:
             fields.append(
                 f"""CAST({self.source_data_modified_column_name} AS DATETIME) {tz_info} AS data_modified"""
             )
-        fields.append("*")
+
+        if explicitly_read_columns:
+            for column in explicitly_read_columns:
+                fields.append(column.name) #TODO: add type conversions
+
+        if not explicitly_read_columns:
+            fields.append("*")
+
+        if len(fields) != len(set(fields)):
+            raise ValueError(
+                "The list of selected fields contains duplicates! Please remove and then proceed."
+            )
+
         sql.append(",\n".join(fields))
 
         sql.append(f"FROM {self.source_path}")
