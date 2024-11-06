@@ -51,7 +51,7 @@ class Index:
         )
         index_columns_snake = "_".join(f"{col.name}" for col in self.columns)
 
-        return f"CREATE {unique_clause}{self.index_type.name} INDEX {index_columns_snake} ON {path.to_str} ({index_columns});"
+        return f"CREATE {unique_clause}{self.index_type.name} INDEX {index_columns_snake} ON {path.to_str()} ({index_columns});"
 
 
 @dataclass
