@@ -15,6 +15,16 @@ class InvalidPathException(Exception):
 
 
 @dataclass
+class Path:
+    database: str
+    schema: str
+    table: str
+
+    def to_str(self) -> str:
+        return f"{self.database}.{self.schema}.{self.table}"
+
+
+@dataclass
 class Column:
     name: str
     data_type: str
@@ -34,14 +44,14 @@ class Index:
     is_unique: bool = False
     sort_direction: SortDirection = SortDirection.ASC
 
-    def to_sql(self, path: str) -> str:
+    def to_sql(self, path: Path) -> str:
         unique_clause = "UNIQUE " if self.is_unique else ""
         index_columns = ", ".join(
             f"{col.name} {self.sort_direction.value}" for col in self.columns
         )
         index_columns_snake = "_".join(f"{col.name}" for col in self.columns)
 
-        return f"CREATE {unique_clause}{self.index_type.name} INDEX {index_columns_snake} ON {path} ({index_columns});"
+        return f"CREATE {unique_clause}{self.index_type.name} INDEX {index_columns_snake} ON {path.to_str} ({index_columns});"
 
 
 @dataclass
@@ -66,15 +76,16 @@ class Table:
         indexes: Any indexes you want the table to use
     """
 
-    source_path: str
-    destination_path: str
+    source_path: Path
+    destination_path: Path
     source_data_modified_column_name: str = None
     destination_data_modified_column_name: str = "data_modified"
-    temp_table_path: str = None
+    temp_table_schema: str = "INTERNAL"
     enforce_primary_key: bool = False
     timezone: SqlServerTimeZone = SqlServerTimeZone.UTC
     write_mode: WriteMode = WriteMode.APPEND
 
+    temp_table_path: Path = None
     default_columns: Optional[list[Column]] = field(default_factory=list)
     unique_columns: Optional[list[Column]] = field(default_factory=list)
     non_unique_columns: Optional[list[Column]] = field(default_factory=list)
@@ -94,31 +105,24 @@ class Table:
         return False
 
     def __post_init__(self):
-        if not self.path_is_valid(
-            string=self.destination_path
-        ) or not self.path_is_valid(string=self.source_path):
-            raise InvalidPathException(
-                "Path must be formatted like <database>.<schema>.<table>"
-            )
-
         self.create_column_list()
+        self.temp_table_path=Path(database=self.destination_path.database, schema=self.temp_table_schema, table=f"{self.destination_path.table}_{now().format('YYMMDDHHmmss')}")
 
     def join_columns_by(self, columns: list[Column], separator: str = ","):
         if len(columns) == 0:
             return ""
         return separator.join([col.name for col in columns])
 
-    def table_ddl(self) -> str:
+    def table_ddl(self, path: Path) -> str:
+
+        ddl = [f"CREATE TABLE {path.to_str()} ("]
+
         columns_def = [col.column_definition() for col in self._columns]
         indexes_sql = "\n".join(
-            index.to_sql(self.destination_path) for index in self.indexes
+            index.to_sql(path=path) for index in self.indexes
         )
 
-        ddl_parts = []
-
-        ddl_parts.append(f"CREATE TABLE {self.destination_path} (")
-
-        ddl_parts.append(",\n  ".join(columns_def))
+        ddl_parts = columns_def
 
         if self.enforce_primary_key:
             pk_name = "_".join(col.name for col in self.unique_columns)
@@ -127,25 +131,20 @@ class Table:
                 f"CONSTRAINT PK_{pk_name}_{now().format("YYMMDDHHmmss")} PRIMARY KEY ({pk_definition})"
             )
 
-        ddl_parts.append(");")
-
         ddl_parts.append(indexes_sql)
 
-        ddl = "\n".join(ddl_parts)
+        ddl.append(",\n".join(ddl_parts))
 
-        ddl = (
-            f"CREATE TABLE {self.destination_path} (\n  "
-            + ",\n  ".join(columns_def)
-            + ","
-            "\n);\n" + indexes_sql
-        )
+        ddl.append(");")
 
-        return ddl
+        table_ddl_str = "\n".join(ddl)
+
+        return table_ddl_str
 
     def insert_sql(self) -> str:
         column_names = ", ".join([col.name for col in self._columns])
         placeholders = ", ".join(["?"] * len(self._columns))
-        return f"INSERT INTO {self.destination_path} ({column_names}) VALUES ({placeholders});"
+        return f"INSERT INTO {self.destination_path.to_str()} ({column_names}) VALUES ({placeholders});"
 
     def read_sql(self, since: Optional[str] = None, until: Optional[str] = None) -> str:
         """
@@ -171,7 +170,7 @@ class Table:
         fields.append("*")
         sql.append(",\n".join(fields))
 
-        sql.append(f"FROM {self.source_path}")
+        sql.append(f"FROM {self.source_path.to_str()}")
 
         if since and until:
             sql.append(
@@ -179,6 +178,9 @@ class Table:
             )
 
         sql_string = "\n".join(sql)
+
+        print("THIS IS THE SQL STRING YO")
+        print(sql_string)
 
         return sql_string
 

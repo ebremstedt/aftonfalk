@@ -5,6 +5,7 @@ from pendulum import now
 import pyodbc
 import struct
 from urllib.parse import urlparse, unquote
+from aftonfalk.mssql.types_ import Path
 
 
 class MssqlDriver:
@@ -130,8 +131,8 @@ class MssqlDriver:
 
     def merge_ddl(
         self,
-        source_path: str,
-        destination_path: str,
+        source_path: Path,
+        destination_path: Path,
         unique_columns: list[str],
         update_columns: list[str],
         modified_column: str,
@@ -151,9 +152,9 @@ class MssqlDriver:
             [f"source.{col}" for col in unique_columns + update_columns]
         )
 
-        return f"""
-            MERGE INTO {destination_path} AS target
-            USING {source_path} AS source
+        merge_ddl = f"""
+            MERGE INTO {destination_path.to_str()} AS target
+            USING {source_path.to_str()} AS source
             ON {on_conditions}
             WHEN MATCHED THEN
                 UPDATE SET {update_clause}
@@ -162,14 +163,18 @@ class MssqlDriver:
                 VALUES ({insert_values});
         """
 
-    def _schema_exists(self, catalog: str, schema: str) -> bool:
+        print(merge_ddl)
+
+        return merge_ddl
+
+    def _schema_exists(self, path: Path) -> bool:
         """Create ddl to check if anything exists"""
         sql = f"""SELECT
             top 1 CASE
                 WHEN EXISTS (
                     SELECT 1
-                    FROM {catalog}.sys.schemas
-                    WHERE name = '{schema}'
+                    FROM {path.database}.sys.schemas
+                    WHERE name = '{path.schema}'
                 )
                 THEN 1
                 ELSE 0
@@ -183,16 +188,16 @@ class MssqlDriver:
 
         return schema_exists
 
-    def _table_exists(self, catalog: str, schema: str, table_name: str) -> bool:
+    def _table_exists(self, path: Path) -> bool:
         """Create ddl to check if anything exists"""
         sql = f"""SELECT
             top 1 CASE
                 WHEN EXISTS (
                     SELECT 1
-                    FROM [{catalog}].sys.tables t
-                    LEFT JOIN [{catalog}].sys.schemas s on t.schema_id  = s.schema_id
-                    WHERE t.name = '{table_name}'
-                    AND s.name = '{schema}'
+                    FROM [{path.database}].sys.tables t
+                    LEFT JOIN [{path.database}].sys.schemas s on t.schema_id  = s.schema_id
+                    WHERE t.name = '{path.table}'
+                    AND s.name = '{path.schema}'
                 )
                 THEN 1
                 ELSE 0
@@ -206,12 +211,12 @@ class MssqlDriver:
 
         return table_exists
 
-    def _create_schema(self, catalog: str, schema: str):
+    def _create_schema(self, path: Path):
         """Create schema if it does not already exist"""
-        if not self._schema_exists(catalog=catalog, schema=schema):
-            self.create_schema_in_one_go(catalog=catalog, schema=schema)
+        if not self._schema_exists(path=path):
+            self.create_schema_in_one_go(path=path)
 
-    def create_table(self, path: str, ddl: str, drop_first: Optional[bool] = False):
+    def create_table(self, path: Path, ddl: str, drop_first: Optional[bool] = False):
         """Create table. An effort to standardize our landing area.
 
         Parameters:
@@ -219,14 +224,13 @@ class MssqlDriver:
             ddl: the ddl to create the table
             drop_first: do you want to drop the table before creating it
         """
-        catalog, schema, table = path.split(".")
 
-        if self._table_exists(catalog=catalog, schema=schema, table_name=table):
+        if self._table_exists(path=path):
             if not drop_first:
                 return
-            self.execute(sql=f"DROP TABLE {path};")
+            self.execute(sql=f"DROP TABLE {path.to_str()};")
 
-        self._create_schema(catalog=catalog, schema=schema)
+        self._create_schema(path=path)
 
         self.execute(sql=ddl)
 
@@ -252,8 +256,9 @@ class MssqlDriver:
 
     def merge(
         self,
-        destination_path: str,
-        temp_table_path: str,
+        destination_path: Path,
+        temp_table_path: Path,
+        temp_table_ddl: str,
         table_ddl: str,
         insert_sql: str,
         unique_columns: list[str],
@@ -278,14 +283,13 @@ class MssqlDriver:
             data: the data itself
             drop_destination_first: whether you want to drop the destination before creating table
         """
+
         self.create_table(
             ddl=table_ddl, path=destination_path, drop_first=drop_destination_first
         )
 
-        temp_table_path = f"{temp_table_path}_{now().format('YYMMDDHHmmss')}"
-
         self.create_table(
-            ddl=table_ddl,
+            ddl=temp_table_ddl,
             path=temp_table_path,
         )
 
@@ -299,6 +303,8 @@ class MssqlDriver:
             modified_column=modified_column,
         )
 
+        print(merge_sql)
+
         self.execute(sql=merge_sql)
 
-        self.execute(sql=f"DROP TABLE {temp_table_path};")
+        self.execute(sql=f"DROP TABLE {temp_table_path.to_str()};")
