@@ -38,28 +38,31 @@ class Column:
 
 @dataclass
 class Index:
-    name: str
     index_type: SqlServerIndexType
     columns: list[Column]
     is_unique: bool = False
     sort_direction: SortDirection = SortDirection.ASC
+
+    def index_name(self, path: Path) -> str:
+        index_columns_snake = "_".join(f"{col.name}" for col in self.columns)
+        return f"{path.table}_{index_columns_snake}"
 
     def to_sql(self, path: Path) -> str:
         unique_clause = "UNIQUE " if self.is_unique else ""
         index_columns = ", ".join(
             f"{col.name} {self.sort_direction.value}" for col in self.columns
         )
-        index_columns_snake = "_".join(f"{col.name}" for col in self.columns)
 
-        return f"CREATE {unique_clause}{self.index_type.name} INDEX {index_columns_snake} ON {path.to_str()} ({index_columns});"
-
+        # Index names are unique so have to use table prefix here
+        index_str = f"CREATE {unique_clause}{self.index_type.name} INDEX {self.index_name(path=path)} ON {path.to_str()} ({index_columns})"
+        return index_str
 
 @dataclass
 class Table:
     """
     Parameters
-        source_path: Source table location. Format: <database>.<schema>.<table>
-        destination_path: Desired destination table location. Format: <database>.<schema>.<table>
+        source_path: Source table location.
+        destination_path: Desired destination table location.
         source_data_modified_column_name: The name of the field that indicates when a row was modified
         destination_data_modified_column_name: self explanatory
         temp_table_path: Location of temp table, only applicable with WriteMode.MERGE
@@ -69,6 +72,7 @@ class Table:
             TRUNCATE_WRITE
             APPEND
             MERGE
+        batch_size: The number of rows to insert
 
         default_columns: Columns that you want to be default for the table
         unique_columns: Columns which make a row unique in the table
@@ -84,6 +88,7 @@ class Table:
     enforce_primary_key: bool = False
     timezone: SqlServerTimeZone = SqlServerTimeZone.UTC
     write_mode: WriteMode = WriteMode.APPEND
+    batch_size: int = 250
 
     temp_table_path: Path = None
     default_columns: Optional[list[Column]] = field(default_factory=list)
@@ -104,9 +109,18 @@ class Table:
             return True
         return False
 
+    def valid_batch_size(self) -> bool:
+        return 0 < self.batch_size < 501
+
     def __post_init__(self):
         self.create_column_list()
-        self.temp_table_path=Path(database=self.destination_path.database, schema=self.temp_table_schema, table=f"{self.destination_path.table}_{now().format('YYMMDDHHmmss')}")
+        self.temp_table_path=Path(
+            database=self.destination_path.database,
+            schema=self.temp_table_schema,
+            table=f"{self.destination_path.table}_{now().format('YYMMDDHHmmss')}"
+        )
+        if not self.valid_batch_size():
+            raise ValueError("Batch size needs to be between (including) 1 and 500")
 
     def join_columns_by(self, columns: list[Column], separator: str = ","):
         if len(columns) == 0:
@@ -118,9 +132,6 @@ class Table:
         ddl = [f"CREATE TABLE {path.to_str()} ("]
 
         columns_def = [col.column_definition() for col in self._columns]
-        indexes_sql = "\n".join(
-            index.to_sql(path=path) for index in self.indexes
-        )
 
         ddl_parts = columns_def
 
@@ -131,8 +142,6 @@ class Table:
                 f"CONSTRAINT PK_{pk_name}_{now().format("YYMMDDHHmmss")} PRIMARY KEY ({pk_definition})"
             )
 
-        ddl_parts.append(indexes_sql)
-
         ddl.append(",\n".join(ddl_parts))
 
         ddl.append(");")
@@ -141,10 +150,10 @@ class Table:
 
         return table_ddl_str
 
-    def insert_sql(self) -> str:
+    def insert_sql(self, path: Path) -> str:
         column_names = ", ".join([col.name for col in self._columns])
         placeholders = ", ".join(["?"] * len(self._columns))
-        return f"INSERT INTO {self.destination_path.to_str()} ({column_names}) VALUES ({placeholders});"
+        return f"INSERT INTO {path.to_str()} ({column_names}) VALUES ({placeholders});"
 
     def read_sql(self, since: Optional[str] = None, until: Optional[str] = None) -> str:
         """
@@ -178,9 +187,6 @@ class Table:
             )
 
         sql_string = "\n".join(sql)
-
-        print("THIS IS THE SQL STRING YO")
-        print(sql_string)
 
         return sql_string
 
