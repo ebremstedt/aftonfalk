@@ -1,10 +1,11 @@
 from itertools import batched
 from typing import Any, Iterable, Optional
 from datetime import datetime, timedelta, timezone
-from pendulum import now
 import pyodbc
 import struct
 from urllib.parse import urlparse, unquote
+from aftonfalk.mssql.types_ import Path, Table
+from aftonfalk.mssql.enums_ import WriteMode
 
 
 class MssqlDriver:
@@ -77,7 +78,6 @@ class MssqlDriver:
         """
         with pyodbc.connect(self.connection_string) as conn:
             conn.add_output_converter(-155, self.handle_datetimeoffset)
-
             with conn.cursor() as cursor:
                 if catalog is not None:
                     cursor.execute(f"USE {catalog};")
@@ -130,30 +130,28 @@ class MssqlDriver:
 
     def merge_ddl(
         self,
-        source_path: str,
-        destination_path: str,
-        unique_columns: list[str],
-        update_columns: list[str],
-        modified_column: str,
+        table: Table,
     ) -> str:
-        if not unique_columns or not update_columns:
+        update_columns = table.non_unique_columns + table.default_columns
+
+        if not table.unique_columns or not update_columns:
             raise ValueError("Unique columns and update columns cannot be empty.")
 
         on_conditions = (
-            " AND ".join([f"target.{col} = source.{col}" for col in unique_columns])
-            + f" AND source.{modified_column} >= target.{modified_column}"
+            " AND ".join([f"target.{col.name} = source.{col.name}" for col in table.unique_columns])
+            + f" AND source.{table.destination_data_modified_column_name} >= target.{table.destination_data_modified_column_name}"
         )
         update_clause = ", ".join(
-            [f"target.{col} = source.{col}" for col in update_columns]
+            [f"target.{col.name} = source.{col.name}" for col in update_columns]
         )
-        insert_columns = ", ".join(unique_columns + update_columns)
+        insert_columns = ", ".join([col.name for col in table._columns])
         insert_values = ", ".join(
-            [f"source.{col}" for col in unique_columns + update_columns]
+            [f"source.{col.name}" for col in table._columns]
         )
 
-        return f"""
-            MERGE INTO {destination_path} AS target
-            USING {source_path} AS source
+        merge_ddl = f"""
+            MERGE INTO {table.destination_path.to_str()} AS target
+            USING {table.temp_table_path.to_str()} AS source
             ON {on_conditions}
             WHEN MATCHED THEN
                 UPDATE SET {update_clause}
@@ -162,14 +160,16 @@ class MssqlDriver:
                 VALUES ({insert_values});
         """
 
-    def _schema_exists(self, catalog: str, schema: str) -> bool:
+        return merge_ddl
+
+    def _schema_exists(self, path: Path) -> bool:
         """Create ddl to check if anything exists"""
         sql = f"""SELECT
             top 1 CASE
                 WHEN EXISTS (
                     SELECT 1
-                    FROM {catalog}.sys.schemas
-                    WHERE name = '{schema}'
+                    FROM {path.database}.sys.schemas
+                    WHERE name = '{path.schema}'
                 )
                 THEN 1
                 ELSE 0
@@ -183,16 +183,25 @@ class MssqlDriver:
 
         return schema_exists
 
-    def _table_exists(self, catalog: str, schema: str, table_name: str) -> bool:
+    def _index_exists(self, path: Path, index_name: str) -> bool:
+        """Create ddl to check if anything exists"""
+        sql = f"SELECT i.name as index_name FROM {path.database}.sys.indexes i WHERE i.name = '{index_name}'"
+        for row in self.read(query=sql):
+            if row.get("index_name") == index_name:
+                return True
+        return False
+
+
+    def _table_exists(self, path: Path) -> bool:
         """Create ddl to check if anything exists"""
         sql = f"""SELECT
             top 1 CASE
                 WHEN EXISTS (
                     SELECT 1
-                    FROM [{catalog}].sys.tables t
-                    LEFT JOIN [{catalog}].sys.schemas s on t.schema_id  = s.schema_id
-                    WHERE t.name = '{table_name}'
-                    AND s.name = '{schema}'
+                    FROM [{path.database}].sys.tables t
+                    LEFT JOIN [{path.database}].sys.schemas s on t.schema_id  = s.schema_id
+                    WHERE t.name = '{path.table}'
+                    AND s.name = '{path.schema}'
                 )
                 THEN 1
                 ELSE 0
@@ -206,59 +215,61 @@ class MssqlDriver:
 
         return table_exists
 
-    def _create_schema(self, catalog: str, schema: str):
+    def _create_schema(self, path: Path):
         """Create schema if it does not already exist"""
-        if not self._schema_exists(catalog=catalog, schema=schema):
-            self.create_schema_in_one_go(catalog=catalog, schema=schema)
+        if not self._schema_exists(path=path):
+            self.create_schema_in_one_go(path=path)
 
-    def create_table(self, path: str, ddl: str, drop_first: Optional[bool] = False):
-        """Create table. An effort to standardize our landing area.
-
+    def create_table(self, path: Path, ddl: str, drop_first: Optional[bool] = False):
+        """
         Parameters:
             Path: where the table would be located
             ddl: the ddl to create the table
-            drop_first: do you want to drop the table before creating it
+            drop_first: do you want to drop the table before creating it (default: False)
         """
-        catalog, schema, table = path.split(".")
 
-        if self._table_exists(catalog=catalog, schema=schema, table_name=table):
+        if self._table_exists(path=path):
             if not drop_first:
                 return
-            self.execute(sql=f"DROP TABLE {path};")
+            self.execute(sql=f"DROP TABLE {path.to_str()};")
 
-        self._create_schema(catalog=catalog, schema=schema)
+        self._create_schema(path=path)
 
         self.execute(sql=ddl)
 
+    def apply_indexes(self, table: Table, path: Path):
+        for index in table.indexes:
+            if not self._index_exists(path=path, index_name=index.index_name(path=path)):
+                self.execute(sql=index.to_sql(path=path))
+
     def truncate_write(
         self,
-        destination_path: str,
-        table_ddl: str,
+        table: Table,
         data: Iterable[dict],
-        insert_sql: str,
     ):
-        self.create_table(path=destination_path, ddl=table_ddl, drop_first=True)
-        self.write(sql=insert_sql, data=data)
+        path = table.destination_path
+        self.create_table(path=path, ddl=table.table_ddl(path=path), drop_first=True)
+
+        self.apply_indexes(table=table, path=path)
+
+        self.write(sql=table.insert_sql(path=path), data=data, batch_size=table.batch_size)
 
     def append(
         self,
-        destination_path: str,
-        table_ddl: str,
-        data: Iterable[dict],
-        insert_sql: str,
+        table: Table,
+        data: Iterable[dict]
     ):
-        self.create_table(path=destination_path, ddl=table_ddl, drop_first=False)
-        self.write(sql=insert_sql, data=data)
+        path = table.destination_path
+
+        self.create_table(path=path, ddl=table.table_ddl(path=path))
+
+        self.apply_indexes(table=table, path=path)
+
+        self.write(sql=table.insert_sql(path=path), data=data, batch_size=table.batch_size)
 
     def merge(
         self,
-        destination_path: str,
-        temp_table_path: str,
-        table_ddl: str,
-        insert_sql: str,
-        unique_columns: list[str],
-        update_columns: list[str],
-        modified_column: str,
+        table: Table,
         data: Iterable[list],
         drop_destination_first: Optional[bool] = False,
     ):
@@ -268,37 +279,43 @@ class MssqlDriver:
         Data is then merged to destination table, and the temporary table is deleted.
 
         Parameters:
-            destination_path: where you want the table to end up. formatted like catalog.schema.table
-            temp_table_path: where you want the temporary table to end up (and deleted)
-            table_ddl: definition of the table you want to create
-            insert_sql: insert statement to the table you want to insert to
-            unique_columns: list of columns which tells the merge statement what to join on when merging
-            update_coluns: list of columns which tells the merge statment which columns to update
-            modified_column: when comparing source vs destination rows, choose the latest one
+            table: the table to merge to
             data: the data itself
             drop_destination_first: whether you want to drop the destination before creating table
         """
-        self.create_table(
-            ddl=table_ddl, path=destination_path, drop_first=drop_destination_first
-        )
-
-        temp_table_path = f"{temp_table_path}_{now().format('YYMMDDHHmmss')}"
 
         self.create_table(
-            ddl=table_ddl,
-            path=temp_table_path,
+            ddl=table.table_ddl(path=table.destination_path),
+            path=table.destination_path,
+            drop_first=drop_destination_first
         )
+        self.apply_indexes(table=table, path=table.destination_path)
 
-        self.write(sql=insert_sql, data=data)
+        self.create_table(
+            ddl=table.table_ddl(path=table.temp_table_path),
+            path=table.temp_table_path,
+        )
+        self.apply_indexes(table=table, path=table.temp_table_path)
+
+        self.write(sql=table.insert_sql(path=table.temp_table_path), data=data, batch_size=table.batch_size)
 
         merge_sql = self.merge_ddl(
-            source_path=temp_table_path,
-            destination_path=destination_path,
-            unique_columns=unique_columns,
-            update_columns=update_columns,
-            modified_column=modified_column,
+            table=table,
         )
 
         self.execute(sql=merge_sql)
 
-        self.execute(sql=f"DROP TABLE {temp_table_path};")
+        self.execute(sql=f"DROP TABLE {table.temp_table_path.to_str()};")
+
+
+    def write_using_modes(self, table: Table, data: Iterable[dict]):
+        if table.write_mode == WriteMode.APPEND:
+            self.append(
+                table=table, data=data
+            )
+        elif table.write_mode == WriteMode.TRUNCATE_WRITE:
+            self.truncate_write(
+                table=table, data=data
+            )
+        elif table.write_mode == WriteMode.MERGE:
+            self.merge(table=table, data=data)

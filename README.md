@@ -30,55 +30,63 @@ data = driver.read(query="select * from tablex")
 driver.write(sql="INSERT INTO tablex (column_name) VALUES ('column_value')", data=data)
 ```
 
-Manage tables.
+Manage tables. Generate them programatically.
 
 ```python
-from aftonfalk.mssql.enums_ import SqlServerDataType, SqlServerIndexType, SqlServerTimeZone, WriteMode
-from aftonfalk.mssql.types_ import Column, Table, Index
-
+from aftonfalk.mssql.enums_ import (
+    SqlServerDataType,
+    SqlServerTimeZone,
+    WriteMode,
+    SqlServerIndexType,
+)
+from aftonfalk.mssql.types_ import Column, Table, Index, Path
 
 source_database = "source_database"
 source_schema = "source_schema"
+
 destination_database = "destination_database"
 destination_schema = "destination_schema"
 
-TIMEZONE = SqlServerTimeZone.CENTRAL_EUROPEAN_STANDARD_TIME
-
-WRITE_MODE = WriteMode.APPEND
-
-DATA_MODIFIED = Column(name="data_modified", data_type="DATETIMEOFFSET", constraints="NOT NULL")
+DATA_MODIFIED = Column(
+    name="data_modified", data_type="DATETIMEOFFSET", constraints="NOT NULL"
+)
 
 DEFAULT_COLUMNS = [
     Column(name="metadata_modified", data_type="DATETIMEOFFSET", constraints="NOT NULL"),
     DATA_MODIFIED,
     Column(name="data", data_type="NVARCHAR(MAX)", constraints="NOT NULL"),
 ]
-INDEXES = [
-    Index(
-        name="data_modified_nc",
-        index_type=SqlServerIndexType.NONCLUSTERED,
-        columns=[DATA_MODIFIED],
-    )
-]
 
-tables = {
-    "table": Table(
-        source_path=f"{source_database}.{source_schema}.table",
-        destination_path=f"{destination_database}.{destination_schema}.table",
-        source_data_modified_column_name="credat",
-        timezone=TIMEZONE,
-        write_mode=WRITE_MODE,
+table_and_key = {
+    "FactTable": "FactKey",
+    "Dimensiontable": "DimensionKey"
+}
+tables = {}
+
+for name, key in table_and_key.items():
+    tables[name] = Table(
+        source_path=Path(database=source_database, schema=source_schema, table=name),
+        destination_path=Path(database=destination_database, schema=destination_schema, table=name),
+        source_data_modified_column_name="RowUpdatedAt",
+        timezone=SqlServerTimeZone.CENTRAL_EUROPEAN_STANDARD_TIME,
         default_columns=DEFAULT_COLUMNS,
+        write_mode=WriteMode.APPEND,
+        batch_size=200,
         unique_columns=[
             Column(
-                name="table_code",
+                name=f"{key}",
                 data_type=SqlServerDataType.NVARCHAR.with_length(50),
                 constraints="NOT NULL",
             )
         ],
-        indexes=INDEXES
+        indexes=[
+            Index(
+                index_type=SqlServerIndexType.NONCLUSTERED,
+                columns=[DATA_MODIFIED]
+            )
+        ]
     )
-}
+
 ```
 
 then you can do things like easily:
