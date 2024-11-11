@@ -62,8 +62,8 @@ class MssqlDriver:
         self,
         query: str,
         params: Optional[tuple] = None,
-        batch_size: Optional[int] = 100,
-        catalog: Optional[str] = None,
+        batch_size: Optional[int] = 1000,
+        database: Optional[str] = None,
     ) -> Iterable[dict]:
         """Read data from database
 
@@ -71,7 +71,7 @@ class MssqlDriver:
             query: the query to run
             params: any params you might wish to use in the query
             batch_size: divide total read into smaller batches
-            catalog: Useful when queries need a catalog context, such as when querying the INFORMATION_SCHEMA tables
+            database: Useful when queries need a database context, such as when querying the INFORMATION_SCHEMA tables
 
         returns:
             Generator of dicts
@@ -79,8 +79,8 @@ class MssqlDriver:
         with pyodbc.connect(self.connection_string) as conn:
             conn.add_output_converter(-155, self.handle_datetimeoffset)
             with conn.cursor() as cursor:
-                if catalog is not None:
-                    cursor.execute(f"USE {catalog};")
+                if database is not None:
+                    cursor.execute(f"USE {database};")
                 if params is not None:
                     cursor.execute(query, params)
                 else:
@@ -106,7 +106,7 @@ class MssqlDriver:
                 cursor.execute(sql, *params)
                 cursor.commit()
 
-    def write(self, sql: str, data: Iterable[dict], batch_size: int = 100):
+    def write(self, sql: str, data: Iterable[dict], batch_size: int = 1000):
         """Write to table from a generator of dicts
 
         Good to know: Pyodbc limitation for batch size: number_of_rows * number_of_columns < 2100
