@@ -106,7 +106,7 @@ class MssqlDriver:
                 cursor.execute(sql, *params)
                 cursor.commit()
 
-    def write(self, sql: str, data: Iterable[dict], batch_size: int = 1000, fast_executemany = True):
+    def write(self, sql: str, data: Iterable[dict], batch_size: int = 1000, fast_executemany: bool = False):
         """Write to table from a generator of dicts
 
         Good to know: Pyodbc limitation for batch size: number_of_rows * number_of_columns < 2100
@@ -246,14 +246,14 @@ class MssqlDriver:
     def truncate_write(
         self,
         table: Table,
-        data: Iterable[dict],
+        data: Iterable[dict]
     ):
         path = table.destination_path
         self.create_table(path=path, ddl=table.table_ddl(path=path), drop_first=True)
 
         self.apply_indexes(table=table, path=path)
 
-        self.write(sql=table.insert_sql(path=path), data=data, batch_size=table.batch_size)
+        self.write(sql=table.insert_sql(path=path), data=data, batch_size=table.batch_size, fast_executemany=table.fast_executemany)
 
     def append(
         self,
@@ -266,13 +266,12 @@ class MssqlDriver:
 
         self.apply_indexes(table=table, path=path)
 
-        self.write(sql=table.insert_sql(path=path), data=data, batch_size=table.batch_size)
+        self.write(sql=table.insert_sql(path=path), data=data, batch_size=table.batch_size, fast_executemany=table.fast_executemany)
 
     def merge(
         self,
         table: Table,
-        data: Iterable[list],
-        drop_destination_first: Optional[bool] = False,
+        data: Iterable[list]
     ):
         """
         Creates destination schema + table if it does not already exist.
@@ -287,8 +286,7 @@ class MssqlDriver:
 
         self.create_table(
             ddl=table.table_ddl(path=table.destination_path),
-            path=table.destination_path,
-            drop_first=drop_destination_first
+            path=table.destination_path
         )
         self.apply_indexes(table=table, path=table.destination_path)
 
@@ -298,7 +296,7 @@ class MssqlDriver:
         )
         self.apply_indexes(table=table, path=table.temp_table_path)
 
-        self.write(sql=table.insert_sql(path=table.temp_table_path), data=data, batch_size=table.batch_size)
+        self.write(sql=table.insert_sql(path=table.temp_table_path), data=data, batch_size=table.batch_size, fast_executemany=table.fast_executemany)
 
         merge_sql = self.merge_ddl(
             table=table,

@@ -72,6 +72,7 @@ class Table:
             TRUNCATE_WRITE
             APPEND
             MERGE
+        fast_executemany: pyodbc setting for bulk inserts, defaults to False
         batch_size: The number of rows to insert
 
         default_columns: Columns that you want to be default for the table
@@ -88,6 +89,7 @@ class Table:
     enforce_primary_key: bool = False
     timezone: SqlServerTimeZone = SqlServerTimeZone.UTC
     write_mode: WriteMode = WriteMode.APPEND
+    fast_executemany: bool = False
     batch_size: int = 1000
 
     temp_table_path: Path = None
