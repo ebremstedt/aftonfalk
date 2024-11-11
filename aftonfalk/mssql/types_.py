@@ -110,7 +110,7 @@ class Table:
         return False
 
     def valid_batch_size(self) -> bool:
-        return 0 < self.batch_size < 5001
+        return 0 < self.batch_size < 50001
 
     def __post_init__(self):
         self.create_column_list()
@@ -120,7 +120,7 @@ class Table:
             table=f"{self.destination_path.table}_{now().format('YYMMDDHHmmss')}"
         )
         if not self.valid_batch_size():
-            raise ValueError("Batch size needs to be between (including) 1 and 5000")
+            raise ValueError("Batch size needs to be between (including) 1 and 50000")
 
     def join_columns_by(self, columns: list[Column], separator: str = ","):
         if len(columns) == 0:
