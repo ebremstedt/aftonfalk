@@ -121,12 +121,12 @@ class MssqlDriver:
                 for rows in batched((tuple(row.values()) for row in data), batch_size):
                     cursor.executemany(sql, rows)
 
-    def create_schema_in_one_go(self, catalog: str, schema: str):
+    def create_schema_in_one_go(self, path: Path):
         """Pyodbc cant have these two statements in one go, so we have to execute them to the cursor separately"""
         with pyodbc.connect(self.connection_string) as conn:
             with conn.cursor() as cursor:
-                cursor.execute(f"USE {catalog};")
-                cursor.execute(f"CREATE SCHEMA {schema};")
+                cursor.execute(f"USE {path.database};")
+                cursor.execute(f"CREATE SCHEMA {path.schema};")
 
     def merge_ddl(
         self,
