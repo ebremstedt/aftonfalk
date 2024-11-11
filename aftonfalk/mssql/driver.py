@@ -106,7 +106,7 @@ class MssqlDriver:
                 cursor.execute(sql, *params)
                 cursor.commit()
 
-    def write(self, sql: str, data: Iterable[dict], batch_size: int = 1000):
+    def write(self, sql: str, data: Iterable[dict], batch_size: int = 1000, fast_executemany = True):
         """Write to table from a generator of dicts
 
         Good to know: Pyodbc limitation for batch size: number_of_rows * number_of_columns < 2100
@@ -118,6 +118,7 @@ class MssqlDriver:
         """
         with pyodbc.connect(self.connection_string) as conn:
             with conn.cursor() as cursor:
+                cursor.fast_executemany = fast_executemany
                 for rows in batched((tuple(row.values()) for row in data), batch_size):
                     cursor.executemany(sql, rows)
 
