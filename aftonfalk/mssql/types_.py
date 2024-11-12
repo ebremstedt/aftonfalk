@@ -178,6 +178,11 @@ class Table:
             fields.append(
                 f"""CAST({self.source_data_modified_column_name} AS DATETIME) {tz_info} AS data_modified"""
             )
+        elif not self.source_data_modified_column_name:
+            fields.append(
+                f"""SYSDATETIMEOFFSET() {tz_info} AS data_modified"""
+            )
+
         fields.append("*")
         sql.append(",\n".join(fields))
 
