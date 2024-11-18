@@ -28,6 +28,7 @@ class SqlServerDataType(Enum):
     SMALLMONEY = auto()
     TABLE = auto()
     TIME = auto()
+    TEXT = auto()
     TINYINT = auto()
     UNIQUEIDENTIFIER = auto()
     VARBINARY = auto()
@@ -42,6 +43,7 @@ LENGTH_TYPES = [
     SqlServerDataType.NVARCHAR,
     SqlServerDataType.BINARY,
     SqlServerDataType.VARBINARY,
+    SqlServerDataType.TEXT
 ]
 
 LENGTH_MAX_TYPES = [
@@ -86,16 +88,11 @@ class DataType:
             if self.length is not None:
                 raise ValueError(f"{self.type} type can't have length!.")
 
-        if self.type in PRECISION_SCALE_TYPES and not self.precision:
-            raise ValueError(f"{self.type} type requires a non-empty precision.")
+        if self.type not in PRECISION_ONLY_TYPES and self.precision is not None:
+            raise ValueError(f"{self.type} cant have precision.")
 
-        if self.type in PRECISION_SCALE_TYPES and self.precision and not self.scale:
-            raise ValueError(
-                f"{self.type} type requires a non-empty scale along with precision."
-            )
-
-        if self.type in PRECISION_ONLY_TYPES and not self.precision:
-            raise ValueError(f"{self.type} type requires a non-empty precision.")
+        if self.type not in PRECISION_SCALE_TYPES and (self.precision is not None or self.scale is not None):
+            raise ValueError(f"{self.type} cant have precision or scale.")
 
     def datatype_definition(self) -> str:
 
