@@ -4,8 +4,9 @@ from datetime import datetime, timedelta, timezone
 import pyodbc
 import struct
 from urllib.parse import urlparse, unquote
-from aftonfalk.mssql.types_ import Path, Table
-from aftonfalk.mssql.enums_ import WriteMode
+from aftonfalk.mssql.table import Table
+from aftonfalk.mssql.path import Path
+from aftonfalk.mssql.write_mode import WriteMode
 
 
 class MssqlDriver:
@@ -24,7 +25,7 @@ class MssqlDriver:
 
     def _connection_string(self) -> str:
         parsed = urlparse(self.dsn)
-        technology = parsed.scheme
+        technology = parsed.scheme # noqa # ignore
         user = unquote(parsed.username) if parsed.username else None
         password = unquote(parsed.password) if parsed.password else None
         hostname = parsed.hostname
@@ -106,7 +107,13 @@ class MssqlDriver:
                 cursor.execute(sql, *params)
                 cursor.commit()
 
-    def write(self, sql: str, data: Iterable[dict], batch_size: int = 1000, fast_executemany: bool = False):
+    def write(
+        self,
+        sql: str,
+        data: Iterable[dict],
+        batch_size: int = 1000,
+        fast_executemany: bool = False,
+    ):
         """Write to table from a generator of dicts
 
         Good to know: Pyodbc limitation for batch size: number_of_rows * number_of_columns < 2100
@@ -139,16 +146,19 @@ class MssqlDriver:
             raise ValueError("Unique columns and update columns cannot be empty.")
 
         on_conditions = (
-            " AND ".join([f"target.{col.name} = source.{col.name}" for col in table.unique_columns])
+            " AND ".join(
+                [
+                    f"target.{col.name} = source.{col.name}"
+                    for col in table.unique_columns
+                ]
+            )
             + f" AND source.{table.destination_data_modified_column_name} >= target.{table.destination_data_modified_column_name}"
         )
         update_clause = ", ".join(
             [f"target.{col.name} = source.{col.name}" for col in update_columns]
         )
         insert_columns = ", ".join([col.name for col in table._columns])
-        insert_values = ", ".join(
-            [f"source.{col.name}" for col in table._columns]
-        )
+        insert_values = ", ".join([f"source.{col.name}" for col in table._columns])
 
         merge_ddl = f"""
             MERGE INTO {table.destination_path.to_str()} AS target
@@ -191,7 +201,6 @@ class MssqlDriver:
             if row.get("index_name") == index_name:
                 return True
         return False
-
 
     def _table_exists(self, path: Path) -> bool:
         """Create ddl to check if anything exists"""
@@ -240,39 +249,39 @@ class MssqlDriver:
 
     def apply_indexes(self, table: Table, path: Path):
         for index in table.indexes:
-            if not self._index_exists(path=path, index_name=index.index_name(path=path)):
+            if not self._index_exists(
+                path=path, index_name=index.index_name(path=path)
+            ):
                 self.execute(sql=index.to_sql(path=path))
 
-    def truncate_write(
-        self,
-        table: Table,
-        data: Iterable[dict]
-    ):
+    def truncate_write(self, table: Table, data: Iterable[dict]):
         path = table.destination_path
         self.create_table(path=path, ddl=table.table_ddl(path=path), drop_first=True)
 
         self.apply_indexes(table=table, path=path)
 
-        self.write(sql=table.insert_sql(path=path), data=data, batch_size=table.batch_size, fast_executemany=table.fast_executemany)
+        self.write(
+            sql=table.insert_sql(path=path),
+            data=data,
+            batch_size=table.batch_size,
+            fast_executemany=table.fast_executemany,
+        )
 
-    def append(
-        self,
-        table: Table,
-        data: Iterable[dict]
-    ):
+    def append(self, table: Table, data: Iterable[dict]):
         path = table.destination_path
 
         self.create_table(path=path, ddl=table.table_ddl(path=path))
 
         self.apply_indexes(table=table, path=path)
 
-        self.write(sql=table.insert_sql(path=path), data=data, batch_size=table.batch_size, fast_executemany=table.fast_executemany)
+        self.write(
+            sql=table.insert_sql(path=path),
+            data=data,
+            batch_size=table.batch_size,
+            fast_executemany=table.fast_executemany,
+        )
 
-    def merge(
-        self,
-        table: Table,
-        data: Iterable[list]
-    ):
+    def merge(self, table: Table, data: Iterable[list]):
         """
         Creates destination schema + table if it does not already exist.
         Creates temporary and equivalent table to which data is inserted to.
@@ -286,7 +295,7 @@ class MssqlDriver:
 
         self.create_table(
             ddl=table.table_ddl(path=table.destination_path),
-            path=table.destination_path
+            path=table.destination_path,
         )
         self.apply_indexes(table=table, path=table.destination_path)
 
@@ -296,7 +305,12 @@ class MssqlDriver:
         )
         self.apply_indexes(table=table, path=table.temp_table_path)
 
-        self.write(sql=table.insert_sql(path=table.temp_table_path), data=data, batch_size=table.batch_size, fast_executemany=table.fast_executemany)
+        self.write(
+            sql=table.insert_sql(path=table.temp_table_path),
+            data=data,
+            batch_size=table.batch_size,
+            fast_executemany=table.fast_executemany,
+        )
 
         merge_sql = self.merge_ddl(
             table=table,
@@ -306,15 +320,10 @@ class MssqlDriver:
 
         self.execute(sql=f"DROP TABLE {table.temp_table_path.to_str()};")
 
-
     def write_using_modes(self, table: Table, data: Iterable[dict]):
         if table.write_mode == WriteMode.APPEND:
-            self.append(
-                table=table, data=data
-            )
+            self.append(table=table, data=data)
         elif table.write_mode == WriteMode.TRUNCATE_WRITE:
-            self.truncate_write(
-                table=table, data=data
-            )
+            self.truncate_write(table=table, data=data)
         elif table.write_mode == WriteMode.MERGE:
             self.merge(table=table, data=data)
