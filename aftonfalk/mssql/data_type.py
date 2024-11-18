@@ -68,6 +68,9 @@ class DataType:
     python_definition: str = None
 
     def validate_length_datatypes(self):
+        if not self.length:
+            return
+
         if not (LENGTH_MIN <= self.length <= LENGTH_MAX) and self.length != 0:
             raise ValueError(
                 f"{self.type} length must either be -1 (translates to MAX) or be between 1 and {LENGTH_MAX}."
