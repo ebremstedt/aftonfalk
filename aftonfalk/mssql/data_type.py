@@ -28,6 +28,8 @@ class SqlServerDataType(Enum):
     SMALLMONEY = auto()
     TABLE = auto()
     TIME = auto()
+    TIMESTAMP = auto() # note: this is like ROWVERSION
+    ROWVERSION = auto()
     TEXT = auto()
     TINYINT = auto()
     UNIQUEIDENTIFIER = auto()
