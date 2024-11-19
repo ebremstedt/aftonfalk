@@ -3,7 +3,6 @@ from pendulum import now
 import re
 from typing import Optional
 from aftonfalk.mssql.timezone import SqlServerTimeZone
-from aftonfalk.mssql.data_type import DataType
 from aftonfalk.mssql.index import Index
 from aftonfalk.mssql.path import Path
 from aftonfalk.mssql.column import Column
