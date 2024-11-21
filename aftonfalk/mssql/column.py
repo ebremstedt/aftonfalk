@@ -91,11 +91,17 @@ class DataType:
             if self.length is not None:
                 raise ValueError(f"{self.type} type can't have length!.")
 
-        if self.type not in PRECISION_ONLY_TYPES and self.precision is not None:
-            raise ValueError(f"{self.type} cant have precision.")
+        if self.type not in PRECISION_SCALE_TYPES and self.type not in PRECISION_ONLY_TYPES:
+            if self.precision is not None or self.scale is not None:
+                raise ValueError(f"{self.type} type can't have precision or scale!")
 
-        if self.type not in PRECISION_SCALE_TYPES and (self.precision is not None or self.scale is not None):
-            raise ValueError(f"{self.type} cant have precision or scale.")
+        if self.type in PRECISION_ONLY_TYPES and self.scale is not None:
+            raise ValueError(f"{self.type} type can't have scale!")
+
+        if self.type in PRECISION_SCALE_TYPES:
+            if self.precision is None or self.scale is None:
+                raise ValueError(f"{self.type} type requires both precision and scale!")
+
 
     def datatype_definition(self) -> str:
 
@@ -176,27 +182,28 @@ class Column:
     def column_sql_definition(self) -> str:
         return f"{self.name} {self.data_type.definition} {self.constraints}".strip()
 
-    def is_valid_sql_column_name(self) -> bool:
+    def validate_sql_column_name(self):
         if not (1 <= len(self.name) <= 128):
-            return False
-        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", self.name):
-            return False
+            raise ValueError(f'Name {self.name} must be between 1 and 128')
+
+        def is_valid_string(s: str) -> bool:
+            pattern = r"^[a-zA-ZåäöÅÄÖ0-9_]+$"
+            return bool(re.match(pattern, s))
+
+        if not is_valid_string(s=self.name):
+            raise ValueError(f'Name {self.name} must match: r"^[a-zA-ZåäöÅÄÖ0-9_]+$"')
         if self.name.upper() in RESERVED_KEYWORDS:
-            return False
-        return True
-
-    def validate_types(self):
-        if not isinstance(self.data_type, DataType):
-            raise TypeError(f"Column attribute data_type must be of type DataType")
-
-        if not self.is_valid_sql_column_name():
             error_strings = [
                 "1. Must be between 1 and 128 characters.",
                 "2. Must be letters or underscores.",
                 "3. Cannot be a reserved keyword."
             ]
-
             raise ValueError(f"Column name must fill criteria:\n{'\n'.join(error_strings)}\nThe selected name {self.name} is unfortunately one of {RESERVED_KEYWORDS} ")
+
+    def validate_types(self):
+        if not isinstance(self.data_type, DataType):
+            raise TypeError(f"Column attribute data_type must be of type DataType")
 
     def __post_init__(self):
         self.validate_types()
+        self.validate_sql_column_name()

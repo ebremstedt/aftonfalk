@@ -5,7 +5,7 @@ from typing import Optional
 from aftonfalk.mssql.timezone import SqlServerTimeZone
 from aftonfalk.mssql.index import Index
 from aftonfalk.mssql.path import Path
-from aftonfalk.mssql.column import Column
+from aftonfalk.mssql.column import Column, DataType
 from aftonfalk.mssql.write_mode import WriteMode
 
 
@@ -235,7 +235,7 @@ class Table:
             f"# ruff: noqa: F401",
             f"# Automatically generated from: {class_name}.python_code(). Do not remove noqa",
             f"from aftonfalk.mssql import Table, Path, Column, Index, SqlServerTimeZone, WriteMode, SqlServerIndexType, DataType, SortDirection, SqlServerDataType\n\n",
-            f"{class_name.lower()} = {class_name}(",
+            f"{self.destination_path.table} = {class_name}(",
         ]
 
         properties_lines = []
