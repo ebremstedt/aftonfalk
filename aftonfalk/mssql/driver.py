@@ -152,7 +152,6 @@ class MssqlDriver:
                     for col in table.unique_columns
                 ]
             )
-            + f" AND source.{table.destination_data_modified_column_name} >= target.{table.destination_data_modified_column_name}"
         )
         update_clause = ", ".join(
             [f"target.{col.name} = source.{col.name}" for col in update_columns]
@@ -160,11 +159,13 @@ class MssqlDriver:
         insert_columns = ", ".join([col.name for col in table._columns])
         insert_values = ", ".join([f"source.{col.name}" for col in table._columns])
 
+        date_diff_condition = f"AND source.{table.destination_data_modified_column_name} > target.{table.destination_data_modified_column_name}"
+
         merge_ddl = f"""
             MERGE INTO {table.destination_path.to_str()} AS target
             USING {table.temp_table_path.to_str()} AS source
             ON {on_conditions}
-            WHEN MATCHED THEN
+            WHEN MATCHED {date_diff_condition} THEN
                 UPDATE SET {update_clause}
             WHEN NOT MATCHED THEN
                 INSERT ({insert_columns})
