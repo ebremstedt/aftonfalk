@@ -317,7 +317,11 @@ class MssqlDriver:
             table=table,
         )
 
-        self.execute(sql=merge_sql)
+        try:
+            self.execute(sql=merge_sql)
+        except Exception:
+            print(merge_sql)
+            raise
 
         self.execute(sql=f"DROP TABLE {table.temp_table_path.to_str()};")
 
