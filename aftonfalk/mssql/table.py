@@ -139,7 +139,7 @@ class Table:
 
         if since and until:
             sql.append(
-                f"WHERE '{since}' <= {self.source_data_modified_column_name} AND {self.source_data_modified_column_name} < '{until}'"
+                f"WHERE {since} <= {self.source_data_modified_column_name} AND {self.source_data_modified_column_name} < {until}"
             )
 
         sql_string = "\n".join(sql)
