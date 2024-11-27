@@ -97,15 +97,18 @@ class MssqlDriver:
                         yield dict(zip(columns, row))
 
     def execute(self, sql: str, *params: Any):
-        """Internal function used to execute sql queries without parameters
+        """Internal function used to execute sql
 
         Parameters
             sql: the sql to run
         """
         with pyodbc.connect(self.connection_string) as conn:
             with conn.cursor() as cursor:
-                cursor.execute(sql, *params)
-                cursor.commit()
+                try:
+                    cursor.execute(sql, *params)
+                    cursor.commit()
+                except Exception as e:
+                    raise Exception(f"Execute failed using query\n{sql}") from e
 
     def write(
         self,
@@ -127,7 +130,11 @@ class MssqlDriver:
             with conn.cursor() as cursor:
                 cursor.fast_executemany = fast_executemany
                 for rows in batched((tuple(row.values()) for row in data), batch_size):
-                    cursor.executemany(sql, rows)
+                    try:
+                        cursor.executemany(sql, rows)
+                    except Exception as e:
+                        raise Exception(f"Writing failed using query\n{sql}") from e
+
 
     def create_schema_in_one_go(self, path: Path):
         """Pyodbc cant have these two statements in one go, so we have to execute them to the cursor separately"""
@@ -258,7 +265,6 @@ class MssqlDriver:
     def truncate_write(self, table: Table, data: Iterable[dict]):
         path = table.destination_path
         self.create_table(path=path, ddl=table.table_ddl(path=path), drop_first=True)
-
         self.apply_indexes(table=table, path=path)
 
         self.write(
@@ -270,9 +276,7 @@ class MssqlDriver:
 
     def append(self, table: Table, data: Iterable[dict]):
         path = table.destination_path
-
         self.create_table(path=path, ddl=table.table_ddl(path=path))
-
         self.apply_indexes(table=table, path=path)
 
         self.write(
@@ -291,14 +295,13 @@ class MssqlDriver:
         Parameters:
             table: the table to merge to
             data: the data itself
-            drop_destination_first: whether you want to drop the destination before creating table
         """
-
+        path = table.destination_path
         self.create_table(
-            ddl=table.table_ddl(path=table.destination_path),
-            path=table.destination_path,
+            ddl=table.table_ddl(path=path),
+            path=path,
         )
-        self.apply_indexes(table=table, path=table.destination_path)
+        self.apply_indexes(table=table, path=path)
 
         self.create_table(
             ddl=table.table_ddl(path=table.temp_table_path),
@@ -317,11 +320,7 @@ class MssqlDriver:
             table=table,
         )
 
-        try:
-            self.execute(sql=merge_sql)
-        except Exception:
-            print(merge_sql)
-            raise
+        self.execute(sql=merge_sql)
 
         self.execute(sql=f"DROP TABLE {table.temp_table_path.to_str()};")
 

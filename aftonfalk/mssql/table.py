@@ -26,7 +26,6 @@ class Table:
             MERGE
         fast_executemany: pyodbc setting for bulk inserts, defaults to False
         batch_size: The number of rows to insert
-
         default_columns: Columns that you want to be default for the table
         unique_columns: Columns which make a row unique in the table
         non_unique_columns: The rest of the columns
@@ -43,7 +42,6 @@ class Table:
     write_mode: WriteMode = WriteMode.APPEND
     fast_executemany: bool = False
     batch_size: int = 1000
-
     temp_table_path: Path = None
     default_columns: Optional[list[Column]] = field(default_factory=list)
     unique_columns: Optional[list[Column]] = field(default_factory=list)
@@ -56,23 +54,28 @@ class Table:
         non_default_columns = self.unique_columns + self.non_unique_columns
         self._columns = self.default_columns + non_default_columns
 
-    def path_is_valid(self, string: str) -> bool:
-        pattern = r"^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+){2}$"
+    def path_is_valid(self, path: Path) -> bool:
+        pattern = r"^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)*$"
+        compiled_pattern = re.compile(pattern)
+        return all(compiled_pattern.fullmatch(string) for string in [path.database, path.schema, path.table])
 
-        if re.match(pattern, string):
-            return True
-        return False
+    def set_temp_table_path(self):
+        temp_table_path = Path(
+            database=self.destination_path.database,
+            schema=self.temp_table_schema,
+            table=f"{self.destination_path.table}_{now().format('YYMMDDHHmmss')}",
+        )
+        if self.path_is_valid(path=temp_table_path):
+            self.temp_table_path = temp_table_path
+        else:
+            raise ValueError("Path strings are must comply to letters, numbers, underscores.")
 
     def valid_batch_size(self) -> bool:
         return 0 < self.batch_size < 50001
 
     def __post_init__(self):
         self.create_column_list()
-        self.temp_table_path = Path(
-            database=self.destination_path.database,
-            schema=self.temp_table_schema,
-            table=f"{self.destination_path.table}_{now().format('YYMMDDHHmmss')}",
-        )
+        self.set_temp_table_path()
         if not self.valid_batch_size():
             raise ValueError("Batch size needs to be between (including) 1 and 50000")
 
