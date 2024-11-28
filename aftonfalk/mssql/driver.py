@@ -10,6 +10,9 @@ from aftonfalk.mssql.write_mode import WriteMode
 
 
 class MssqlDriver:
+
+    conn: pyodbc.Connection
+
     def __init__(
         self,
         dsn: str,
@@ -17,14 +20,16 @@ class MssqlDriver:
         trust_server_certificate: bool = True,
         encrypt: bool = False,
     ):
-        self.dsn = dsn
-        self.driver = driver
-        self.trust_server_certificate = trust_server_certificate
-        self.encrypt = encrypt
-        self.connection_string = self._connection_string()
+        connection_string = self._connection_string(
+            dsn=dsn,
+            trust_server_certificate=trust_server_certificate,
+            driver=driver,
+            encrypt=encrypt
+        )
+        self.conn = pyodbc.connect(connection_string)
 
-    def _connection_string(self) -> str:
-        parsed = urlparse(self.dsn)
+    def _connection_string(self, dsn: str, driver: str, trust_server_certificate: bool, encrypt: bool) -> str:
+        parsed = urlparse(dsn)
         technology = parsed.scheme # noqa # ignore
         user = unquote(parsed.username) if parsed.username else None
         password = unquote(parsed.password) if parsed.password else None
@@ -32,14 +37,14 @@ class MssqlDriver:
         port = parsed.port
 
         trust_server_certificate_str = ""
-        if self.trust_server_certificate:
+        if trust_server_certificate:
             trust_server_certificate_str = "TrustServerCertificate=yes;"
 
         encrypt_str = ""
-        if not self.encrypt:
+        if not encrypt:
             encrypt_str = "Encrypt=no;"
 
-            return f"DRIVER={self.driver};SERVER={hostname},{port};UID={user};PWD={password};{trust_server_certificate_str}{encrypt_str}"
+            return f"DRIVER={driver};SERVER={hostname},{port};UID={user};PWD={password};{trust_server_certificate_str}{encrypt_str}"
         else:
             raise ValueError("Invalid DSN format")
 
@@ -77,24 +82,23 @@ class MssqlDriver:
         returns:
             Generator of dicts
         """
-        with pyodbc.connect(self.connection_string) as conn:
-            conn.add_output_converter(-155, self.handle_datetimeoffset)
-            with conn.cursor() as cursor:
-                if database is not None:
-                    cursor.execute(f"USE {database};")
-                if params is not None:
-                    cursor.execute(query, params)
-                else:
-                    cursor.execute(query)
+        self.conn.add_output_converter(-155, self.handle_datetimeoffset)
+        with self.conn.cursor() as cursor:
+            if database is not None:
+                cursor.execute(f"USE {database};")
+            if params is not None:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
 
-                columns = [column[0] for column in cursor.description]
+            columns = [column[0] for column in cursor.description]
 
-                while True:
-                    rows = cursor.fetchmany(batch_size)
-                    if len(rows) == 0:
-                        break
-                    for row in rows:
-                        yield dict(zip(columns, row))
+            while True:
+                rows = cursor.fetchmany(batch_size)
+                if len(rows) == 0:
+                    break
+                for row in rows:
+                    yield dict(zip(columns, row))
 
     def execute(self, sql: str, *params: Any):
         """Internal function used to execute sql
@@ -102,13 +106,12 @@ class MssqlDriver:
         Parameters
             sql: the sql to run
         """
-        with pyodbc.connect(self.connection_string) as conn:
-            with conn.cursor() as cursor:
-                try:
-                    cursor.execute(sql, *params)
-                    cursor.commit()
-                except Exception as e:
-                    raise Exception(f"Execute failed using query\n{sql}") from e
+        with self.conn.cursor() as cursor:
+            try:
+                cursor.execute(sql, *params)
+                cursor.commit()
+            except Exception as e:
+                raise Exception(f"Execute failed using query\n{sql}") from e
 
     def write(
         self,
@@ -126,22 +129,21 @@ class MssqlDriver:
             data: generator of dicts with the data itself
             batch_size: batches the data into manageable chunks for sql server
         """
-        with pyodbc.connect(self.connection_string) as conn:
-            with conn.cursor() as cursor:
-                cursor.fast_executemany = fast_executemany
-                for rows in batched((tuple(row.values()) for row in data), batch_size):
-                    try:
-                        cursor.executemany(sql, rows)
-                    except Exception as e:
-                        raise Exception(f"Writing failed using query\n{sql}") from e
+
+        with self.conn.cursor() as cursor:
+            cursor.fast_executemany = fast_executemany
+            for rows in batched((tuple(row.values()) for row in data), batch_size):
+                try:
+                    cursor.executemany(sql, rows)
+                except Exception as e:
+                    raise Exception(f"Writing failed using query\n{sql}") from e
 
 
     def create_schema_in_one_go(self, path: Path):
         """Pyodbc cant have these two statements in one go, so we have to execute them to the cursor separately"""
-        with pyodbc.connect(self.connection_string) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(f"USE {path.database};")
-                cursor.execute(f"CREATE SCHEMA {path.schema};")
+        with self.conn.cursor() as cursor:
+            cursor.execute(f"USE {path.database};")
+            cursor.execute(f"CREATE SCHEMA {path.schema};")
 
     def merge_ddl(
         self,
