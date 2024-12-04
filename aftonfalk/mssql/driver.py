@@ -258,6 +258,16 @@ class MssqlDriver:
         self.execute(sql=ddl)
 
     def apply_indexes(self, table: Table, path: Path):
+        """
+        Apply indexes to a table if they do not already exist.
+        This method iterates over the indexes defined for the table and checks if each index exists
+        on the target database. If an index does not exist, it is created using the corresponding
+        SQL definition.
+        Args:
+            table (Table): The table object containing the indexes to be applied.
+            path (Path): The path object representing the destination database, schema, and table.
+        """
+
         for index in table.indexes:
             if not self._index_exists(
                 path=path, index_name=index.index_name(path=path)
@@ -265,6 +275,14 @@ class MssqlDriver:
                 self.execute(sql=index.to_sql(path=path))
 
     def truncate_write(self, table: Table, data: Iterable[dict]):
+        """
+        Perform a truncate and write operation for the table.
+        This method creates the table, applies indexes, and writes the data into the table.
+        It first truncates the existing data by recreating the table and then inserts the provided data.
+        Args:
+            table (Table): The table object representing the target table for the write operation.
+            data (Iterable[dict]): The data to be written to the table, represented as an iterable of dictionaries.
+        """
         path = table.destination_path
         self.create_table(path=path, ddl=table.table_ddl(path=path), drop_first=True)
         self.apply_indexes(table=table, path=path)
@@ -277,6 +295,15 @@ class MssqlDriver:
         )
 
     def append(self, table: Table, data: Iterable[dict]):
+        """
+        Perform an append write operation for the table.
+        This method creates the table if it doesn't exist, applies indexes, and appends the provided data
+        to the table.
+        Args:
+            table (Table): The table object representing the target table for the write operation.
+            data (Iterable[dict]): The data to be appended to the table, represented as an iterable of dictionaries.
+        """
+
         path = table.destination_path
         self.create_table(path=path, ddl=table.table_ddl(path=path))
         self.apply_indexes(table=table, path=path)
@@ -327,6 +354,19 @@ class MssqlDriver:
         self.execute(sql=f"DROP TABLE {table.temp_table_path.to_str()};")
 
     def write_using_modes(self, table: Table, data: Iterable[dict]):
+        """
+        Write data to a table using the specified write mode.
+
+        This method delegates the writing operation to the appropriate method based on the table's write mode:
+        - `APPEND`: Appends the data to the table.
+        - `TRUNCATE_WRITE`: Clears the table and writes the data.
+        - `MERGE`: Merges the data with the existing table content.
+
+        Args:
+            table (Table): The table object containing metadata, including the write mode.
+            data (Iterable[dict]): The data to be written, represented as an iterable of dictionaries.
+        """
+
         if table.write_mode == WriteMode.APPEND:
             self.append(table=table, data=data)
         elif table.write_mode == WriteMode.TRUNCATE_WRITE:
