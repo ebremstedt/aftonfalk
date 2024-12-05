@@ -10,7 +10,6 @@ from aftonfalk.mssql.write_mode import WriteMode
 
 
 class MssqlDriver:
-
     conn: pyodbc.Connection
 
     def __init__(
