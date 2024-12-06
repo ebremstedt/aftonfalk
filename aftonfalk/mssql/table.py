@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from pendulum import now
-import re
 from typing import Optional
 from aftonfalk.mssql.timezone import SqlServerTimeZone
 from aftonfalk.mssql.index import Index
@@ -26,7 +25,6 @@ class Table:
             MERGE
         fast_executemany: pyodbc setting for bulk inserts, defaults to False
         batch_size: The number of rows to insert
-
         default_columns: Columns that you want to be default for the table
         unique_columns: Columns which make a row unique in the table
         non_unique_columns: The rest of the columns
@@ -43,7 +41,6 @@ class Table:
     write_mode: WriteMode = WriteMode.APPEND
     fast_executemany: bool = False
     batch_size: int = 1000
-
     temp_table_path: Path = None
     default_columns: Optional[list[Column]] = field(default_factory=list)
     unique_columns: Optional[list[Column]] = field(default_factory=list)
@@ -56,23 +53,19 @@ class Table:
         non_default_columns = self.unique_columns + self.non_unique_columns
         self._columns = self.default_columns + non_default_columns
 
-    def path_is_valid(self, string: str) -> bool:
-        pattern = r"^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+){2}$"
-
-        if re.match(pattern, string):
-            return True
-        return False
+    def set_temp_table_path(self):
+        self.temp_table_path = Path(
+            database=self.destination_path.database,
+            schema=self.temp_table_schema,
+            table=f"{self.destination_path.table}_{now().format('YYMMDDHHmmss')}",
+        )
 
     def valid_batch_size(self) -> bool:
         return 0 < self.batch_size < 50001
 
     def __post_init__(self):
         self.create_column_list()
-        self.temp_table_path = Path(
-            database=self.destination_path.database,
-            schema=self.temp_table_schema,
-            table=f"{self.destination_path.table}_{now().format('YYMMDDHHmmss')}",
-        )
+        self.set_temp_table_path()
         if not self.valid_batch_size():
             raise ValueError("Batch size needs to be between (including) 1 and 50000")
 
@@ -82,28 +75,43 @@ class Table:
         return separator.join([col.name for col in columns])
 
     def table_ddl(self, path: Path) -> str:
+        """
+        Generate the Data Definition Language (DDL) statement for creating a table.
+        This method constructs a CREATE TABLE statement based on the provided path and
+        the attributes of the table, including its columns and optional primary key constraints.
+        Args:
+            path (Path): The database path where the table will be created. It includes the database,
+                        schema, and table name.
+        Returns:
+            str: A string representing the SQL DDL statement for creating the table.
+        """
+
         ddl = [f"CREATE TABLE {path.to_str()} ("]
-
         columns_def = [col.column_sql_definition() for col in self._columns]
-
         ddl_parts = columns_def
-
         if self.enforce_primary_key:
             pk_name = "_".join(col.name for col in self.unique_columns)
             pk_definition = ", ".join(col.name for col in self.unique_columns)
             ddl_parts.append(
-                f"CONSTRAINT PK_{pk_name}_{now().format("YYMMDDHHmmss")} PRIMARY KEY ({pk_definition})"
+                f"CONSTRAINT PK_{path.table}_{pk_name}_{now().format("YYMMDDHHmmss")} PRIMARY KEY ({pk_definition})"
             )
-
         ddl.append(",\n".join(ddl_parts))
-
         ddl.append(");")
-
         table_ddl_str = "\n".join(ddl)
 
         return table_ddl_str
 
     def insert_sql(self, path: Path) -> str:
+        """
+        Generate the SQL INSERT statement for inserting data into a table.
+        This method creates an INSERT statement using the specified path and the column definitions of the table.
+        The values are represented as placeholders (`?`) for parameterized queries.
+        Args:
+            path (Path): The database path where the table resides, including the database, schema, and table name.
+        Returns:
+            str: A string representing the SQL INSERT statement.
+        """
+
         column_names = ", ".join([col.name for col in self._columns])
         placeholders = ", ".join(["?"] * len(self._columns))
         return f"INSERT INTO {path.to_str()} ({column_names}) VALUES ({placeholders});"
@@ -139,7 +147,7 @@ class Table:
 
         if since and until:
             sql.append(
-                f"WHERE '{since}' <= {self.source_data_modified_column_name} AND {self.source_data_modified_column_name} < '{until}'"
+                f"WHERE {since} <= {self.source_data_modified_column_name} AND {self.source_data_modified_column_name} < {until}"
             )
 
         sql_string = "\n".join(sql)
@@ -147,6 +155,11 @@ class Table:
         return sql_string
 
     def has_sensitive_columns(self) -> bool:
+        """
+        This method iterates through the table's columns to determine if any of them are marked as sensitive.
+        Returns:
+            bool: True if the table has at least one sensitive column, otherwise False.
+        """
         for column in self._columns:
             if column.sensitive:
                 return True
@@ -155,7 +168,7 @@ class Table:
     def python_code(self) -> str:
         """Save the object as Python code"""
 
-        def generate_column_python_code(col: Column, dt_string: str) -> str:
+        def _generate_column_python_code(col: Column, dt_string: str) -> str:
             constraints = f", constraints='{col.constraints}'"
             if not col.constraints:
                 constraints=""
@@ -171,10 +184,10 @@ class Table:
 
             return f"Column(name='{col.name}', data_type={dt_string}{constraints}{description}{sensitive})"
 
-        def generate_path_python_code(prefix: str, path: Path) -> str:
+        def _generate_path_python_code(prefix: str, path: Path) -> str:
             return f"{prefix}=Path(database='{path.database}', schema='{path.schema}', table='{path.table}')"
 
-        def generate_data_type_python_code(dt: DataType) -> str:
+        def _generate_data_type_python_code(dt: DataType) -> str:
             args = [f"type=SqlServerDataType.{dt.type.name}"]
             if dt.length is not None:
                 args.append(f"length={dt.length}")
@@ -184,29 +197,28 @@ class Table:
                 args.append(f"scale={dt.scale}")
             return f"DataType({', '.join(args)})"
 
-        def create_columns_list(key: str, value: list[Column]) -> str:
+        def _create_columns_list(key: str, value: list[Column]) -> str:
             columns_list = []
             for col in value:
                 for column_attribute_key, column_attribute_value in vars(col).items():
                     if column_attribute_key == "data_type" and type(column_attribute_value) == DataType:
-                        dt_string = generate_data_type_python_code(dt=column_attribute_value)
-                        column_string = generate_column_python_code(col=col, dt_string=dt_string)
+                        dt_string = _generate_data_type_python_code(dt=column_attribute_value)
+                        column_string = _generate_column_python_code(col=col, dt_string=dt_string)
                         columns_list.append(f"{column_string}")
             return f"{key}=[\n{",\n".join(columns_list)}\n]"
 
-        def create_index_list() -> str:
+        def _create_index_list() -> str:
             index_list = []
             for index in self.indexes:
                 index_list.append(f"Index(\nSqlServerIndexType.{index.index_type.name}")
-                index_list.append(f"{create_columns_list(key="columns", value=index.columns)}")
+                index_list.append(f"{_create_columns_list(key="columns", value=index.columns)}")
                 index_list.append(f"is_unique={index.is_unique}")
                 index_list.append(f"sort_direction={index.sort_direction}\n)")
             return ",\n".join(index_list)
 
-        # Get class name and attributes
         class_name = self.__class__.__name__
         excluded_attributes = ["_columns", "temp_table_path"]
-        attributes = vars(self)  # Get the object's attributes as a dictionary
+        attributes = vars(self)
         attributes = {
             key: value
             for key, value in attributes.items()
@@ -214,20 +226,20 @@ class Table:
         }
 
         paths = []
-        paths.append(generate_path_python_code(prefix="source_path", path=self.source_path))
-        paths.append(generate_path_python_code(prefix="destination_path", path=self.destination_path))
+        paths.append(_generate_path_python_code(prefix="source_path", path=self.source_path))
+        paths.append(_generate_path_python_code(prefix="destination_path", path=self.destination_path))
 
         all_columns = []
         for key, value in attributes.items():
             if isinstance(value, list):
                 if key == "default_columns":
-                    column_list = create_columns_list(key=key, value=value)
+                    column_list = _create_columns_list(key=key, value=value)
                     all_columns.append(column_list)
                 if key == "unique_columns":
-                    column_list = create_columns_list(key=key, value=value)
+                    column_list = _create_columns_list(key=key, value=value)
                     all_columns.append(column_list)
                 if key == "non_unique_columns":
-                    column_list = create_columns_list(key=key, value=value)
+                    column_list = _create_columns_list(key=key, value=value)
                     all_columns.append(column_list)
 
         # Putting it all together (turn off formatting for types & columns)
@@ -249,7 +261,7 @@ class Table:
         properties_lines.append(f"write_mode={self.write_mode}")
         properties_lines.append(f"fast_executemany={self.fast_executemany}")
         properties_lines.append(f"batch_size={self.batch_size}")
-        properties_lines.append(f"indexes=[{create_index_list()}]")
+        properties_lines.append(f"indexes=[{_create_index_list()}]")
 
         code_lines.append(",\n".join(properties_lines))
         code_lines.append(")")

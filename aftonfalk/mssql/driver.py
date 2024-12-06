@@ -10,6 +10,8 @@ from aftonfalk.mssql.write_mode import WriteMode
 
 
 class MssqlDriver:
+    conn: pyodbc.Connection
+
     def __init__(
         self,
         dsn: str,
@@ -17,14 +19,16 @@ class MssqlDriver:
         trust_server_certificate: bool = True,
         encrypt: bool = False,
     ):
-        self.dsn = dsn
-        self.driver = driver
-        self.trust_server_certificate = trust_server_certificate
-        self.encrypt = encrypt
-        self.connection_string = self._connection_string()
+        connection_string = self._connection_string(
+            dsn=dsn,
+            trust_server_certificate=trust_server_certificate,
+            driver=driver,
+            encrypt=encrypt
+        )
+        self.conn = pyodbc.connect(connection_string)
 
-    def _connection_string(self) -> str:
-        parsed = urlparse(self.dsn)
+    def _connection_string(self, dsn: str, driver: str, trust_server_certificate: bool, encrypt: bool) -> str:
+        parsed = urlparse(dsn)
         technology = parsed.scheme # noqa # ignore
         user = unquote(parsed.username) if parsed.username else None
         password = unquote(parsed.password) if parsed.password else None
@@ -32,14 +36,14 @@ class MssqlDriver:
         port = parsed.port
 
         trust_server_certificate_str = ""
-        if self.trust_server_certificate:
+        if trust_server_certificate:
             trust_server_certificate_str = "TrustServerCertificate=yes;"
 
         encrypt_str = ""
-        if not self.encrypt:
+        if not encrypt:
             encrypt_str = "Encrypt=no;"
 
-            return f"DRIVER={self.driver};SERVER={hostname},{port};UID={user};PWD={password};{trust_server_certificate_str}{encrypt_str}"
+            return f"DRIVER={driver};SERVER={hostname},{port};UID={user};PWD={password};{trust_server_certificate_str}{encrypt_str}"
         else:
             raise ValueError("Invalid DSN format")
 
@@ -77,35 +81,36 @@ class MssqlDriver:
         returns:
             Generator of dicts
         """
-        with pyodbc.connect(self.connection_string) as conn:
-            conn.add_output_converter(-155, self.handle_datetimeoffset)
-            with conn.cursor() as cursor:
-                if database is not None:
-                    cursor.execute(f"USE {database};")
-                if params is not None:
-                    cursor.execute(query, params)
-                else:
-                    cursor.execute(query)
+        self.conn.add_output_converter(-155, self.handle_datetimeoffset)
+        with self.conn.cursor() as cursor:
+            if database is not None:
+                cursor.execute(f"USE {database};")
+            if params is not None:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
 
-                columns = [column[0] for column in cursor.description]
+            columns = [column[0] for column in cursor.description]
 
-                while True:
-                    rows = cursor.fetchmany(batch_size)
-                    if len(rows) == 0:
-                        break
-                    for row in rows:
-                        yield dict(zip(columns, row))
+            while True:
+                rows = cursor.fetchmany(batch_size)
+                if len(rows) == 0:
+                    break
+                for row in rows:
+                    yield dict(zip(columns, row))
 
     def execute(self, sql: str, *params: Any):
-        """Internal function used to execute sql queries without parameters
+        """Internal function used to execute sql
 
         Parameters
             sql: the sql to run
         """
-        with pyodbc.connect(self.connection_string) as conn:
-            with conn.cursor() as cursor:
+        with self.conn.cursor() as cursor:
+            try:
                 cursor.execute(sql, *params)
                 cursor.commit()
+            except Exception as e:
+                raise Exception(f"Execute failed using query\n{sql}") from e
 
     def write(
         self,
@@ -123,18 +128,21 @@ class MssqlDriver:
             data: generator of dicts with the data itself
             batch_size: batches the data into manageable chunks for sql server
         """
-        with pyodbc.connect(self.connection_string) as conn:
-            with conn.cursor() as cursor:
-                cursor.fast_executemany = fast_executemany
-                for rows in batched((tuple(row.values()) for row in data), batch_size):
+
+        with self.conn.cursor() as cursor:
+            cursor.fast_executemany = fast_executemany
+            for rows in batched((tuple(row.values()) for row in data), batch_size):
+                try:
                     cursor.executemany(sql, rows)
+                except Exception as e:
+                    raise Exception(f"Writing failed using query\n{sql}") from e
+
 
     def create_schema_in_one_go(self, path: Path):
         """Pyodbc cant have these two statements in one go, so we have to execute them to the cursor separately"""
-        with pyodbc.connect(self.connection_string) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(f"USE {path.database};")
-                cursor.execute(f"CREATE SCHEMA {path.schema};")
+        with self.conn.cursor() as cursor:
+            cursor.execute(f"USE {path.database};")
+            cursor.execute(f"CREATE SCHEMA {path.schema};")
 
     def merge_ddl(
         self,
@@ -152,7 +160,6 @@ class MssqlDriver:
                     for col in table.unique_columns
                 ]
             )
-            + f" AND source.{table.destination_data_modified_column_name} >= target.{table.destination_data_modified_column_name}"
         )
         update_clause = ", ".join(
             [f"target.{col.name} = source.{col.name}" for col in update_columns]
@@ -160,11 +167,13 @@ class MssqlDriver:
         insert_columns = ", ".join([col.name for col in table._columns])
         insert_values = ", ".join([f"source.{col.name}" for col in table._columns])
 
+        date_diff_condition = f"AND source.{table.destination_data_modified_column_name} > target.{table.destination_data_modified_column_name}"
+
         merge_ddl = f"""
             MERGE INTO {table.destination_path.to_str()} AS target
             USING {table.temp_table_path.to_str()} AS source
             ON {on_conditions}
-            WHEN MATCHED THEN
+            WHEN MATCHED {date_diff_condition} THEN
                 UPDATE SET {update_clause}
             WHEN NOT MATCHED THEN
                 INSERT ({insert_columns})
@@ -248,6 +257,16 @@ class MssqlDriver:
         self.execute(sql=ddl)
 
     def apply_indexes(self, table: Table, path: Path):
+        """
+        Apply indexes to a table if they do not already exist.
+        This method iterates over the indexes defined for the table and checks if each index exists
+        on the target database. If an index does not exist, it is created using the corresponding
+        SQL definition.
+        Args:
+            table (Table): The table object containing the indexes to be applied.
+            path (Path): The path object representing the destination database, schema, and table.
+        """
+
         for index in table.indexes:
             if not self._index_exists(
                 path=path, index_name=index.index_name(path=path)
@@ -255,9 +274,16 @@ class MssqlDriver:
                 self.execute(sql=index.to_sql(path=path))
 
     def truncate_write(self, table: Table, data: Iterable[dict]):
+        """
+        Perform a truncate and write operation for the table.
+        This method creates the table, applies indexes, and writes the data into the table.
+        It first truncates the existing data by recreating the table and then inserts the provided data.
+        Args:
+            table (Table): The table object representing the target table for the write operation.
+            data (Iterable[dict]): The data to be written to the table, represented as an iterable of dictionaries.
+        """
         path = table.destination_path
         self.create_table(path=path, ddl=table.table_ddl(path=path), drop_first=True)
-
         self.apply_indexes(table=table, path=path)
 
         self.write(
@@ -268,10 +294,17 @@ class MssqlDriver:
         )
 
     def append(self, table: Table, data: Iterable[dict]):
+        """
+        Perform an append write operation for the table.
+        This method creates the table if it doesn't exist, applies indexes, and appends the provided data
+        to the table.
+        Args:
+            table (Table): The table object representing the target table for the write operation.
+            data (Iterable[dict]): The data to be appended to the table, represented as an iterable of dictionaries.
+        """
+
         path = table.destination_path
-
         self.create_table(path=path, ddl=table.table_ddl(path=path))
-
         self.apply_indexes(table=table, path=path)
 
         self.write(
@@ -290,14 +323,13 @@ class MssqlDriver:
         Parameters:
             table: the table to merge to
             data: the data itself
-            drop_destination_first: whether you want to drop the destination before creating table
         """
-
+        path = table.destination_path
         self.create_table(
-            ddl=table.table_ddl(path=table.destination_path),
-            path=table.destination_path,
+            ddl=table.table_ddl(path=path),
+            path=path,
         )
-        self.apply_indexes(table=table, path=table.destination_path)
+        self.apply_indexes(table=table, path=path)
 
         self.create_table(
             ddl=table.table_ddl(path=table.temp_table_path),
@@ -321,6 +353,19 @@ class MssqlDriver:
         self.execute(sql=f"DROP TABLE {table.temp_table_path.to_str()};")
 
     def write_using_modes(self, table: Table, data: Iterable[dict]):
+        """
+        Write data to a table using the specified write mode.
+
+        This method delegates the writing operation to the appropriate method based on the table's write mode:
+        - `APPEND`: Appends the data to the table.
+        - `TRUNCATE_WRITE`: Clears the table and writes the data.
+        - `MERGE`: Merges the data with the existing table content.
+
+        Args:
+            table (Table): The table object containing metadata, including the write mode.
+            data (Iterable[dict]): The data to be written, represented as an iterable of dictionaries.
+        """
+
         if table.write_mode == WriteMode.APPEND:
             self.append(table=table, data=data)
         elif table.write_mode == WriteMode.TRUNCATE_WRITE:
