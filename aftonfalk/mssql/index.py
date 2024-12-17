@@ -39,6 +39,7 @@ class Index:
         ValueError: If any attributes are invalid during initialization (e.g., empty columns list, invalid index_type).
 
     """
+
     index_type: SqlServerIndexType
     columns: List[Column]
     is_unique: bool = False
@@ -52,7 +53,9 @@ class Index:
     def validate_index_type(self):
         """Ensure index_type is a valid SqlServerIndexType."""
         if not isinstance(self.index_type, SqlServerIndexType):
-            raise ValueError(f"Invalid index_type: {self.index_type}. Must be a SqlServerIndexType.")
+            raise ValueError(
+                f"Invalid index_type: {self.index_type}. Must be a SqlServerIndexType."
+            )
 
     def validate_columns(self):
         """Ensure columns is a non-empty list of Column objects."""
@@ -64,7 +67,9 @@ class Index:
     def validate_sort_direction(self):
         """Ensure sort_direction is a valid SortDirection."""
         if not isinstance(self.sort_direction, SortDirection):
-            raise ValueError(f"Invalid sort_direction: {self.sort_direction}. Must be a SortDirection.")
+            raise ValueError(
+                f"Invalid sort_direction: {self.sort_direction}. Must be a SortDirection."
+            )
 
     def index_name(self, path: Path) -> str:
         """Generate the name for the index."""

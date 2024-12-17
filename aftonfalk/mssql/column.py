@@ -29,7 +29,7 @@ class SqlServerDataType(Enum):
     SMALLMONEY = auto()
     TABLE = auto()
     TIME = auto()
-    TIMESTAMP = auto() # note: this is like ROWVERSION
+    TIMESTAMP = auto()  # note: this is like ROWVERSION
     ROWVERSION = auto()
     TEXT = auto()
     TINYINT = auto()
@@ -46,7 +46,7 @@ LENGTH_TYPES = [
     SqlServerDataType.NVARCHAR,
     SqlServerDataType.BINARY,
     SqlServerDataType.VARBINARY,
-    SqlServerDataType.TEXT
+    SqlServerDataType.TEXT,
 ]
 
 LENGTH_MAX_TYPES = [
@@ -91,7 +91,10 @@ class DataType:
             if self.length is not None:
                 raise ValueError(f"{self.type} type can't have length!.")
 
-        if self.type not in PRECISION_SCALE_TYPES and self.type not in PRECISION_ONLY_TYPES:
+        if (
+            self.type not in PRECISION_SCALE_TYPES
+            and self.type not in PRECISION_ONLY_TYPES
+        ):
             if self.precision is not None or self.scale is not None:
                 raise ValueError(f"{self.type} type can't have precision or scale!")
 
@@ -102,9 +105,7 @@ class DataType:
             if self.precision is None or self.scale is None:
                 raise ValueError(f"{self.type} type requires both precision and scale!")
 
-
     def datatype_definition(self) -> str:
-
         if self.type in LENGTH_TYPES:
             if self.length:
                 return f"{self.type.name}({self.length})".replace("(-1)", "(MAX)")
@@ -140,7 +141,6 @@ class DataType:
 
         return f"DataType({', '.join(args)})"
 
-
     def __post_init__(self):
         self.validate_datatypes()
         self.definition = self.datatype_definition()
@@ -148,28 +148,192 @@ class DataType:
 
 
 RESERVED_KEYWORDS = {
-    "ADD", "ALL", "ALTER", "AND", "ANY", "AS", "ASC", "AUTHORIZATION", "BACKUP", "BEGIN",
-    "BETWEEN", "BREAK", "BROWSE", "BULK", "BY", "CASCADE", "CASE", "CHECK", "CHECKPOINT",
-    "CLOSE", "CLUSTERED", "COALESCE", "COLUMN", "COMMIT", "COMPUTE", "CONSTRAINT", "CONTAINS",
-    "CONTAINSTABLE", "CONTINUE", "CONVERT", "CREATE", "CROSS", "CURRENT", "CURRENT_DATE",
-    "CURRENT_TIME", "CURRENT_TIMESTAMP", "CURRENT_USER", "CURSOR", "DATABASE", "DBCC",
-    "DEALLOCATE", "DECLARE", "DEFAULT", "DELETE", "DENY", "DESC", "DISK", "DISTINCT", "DISTRIBUTED",
-    "DOUBLE", "DROP", "DUMP", "ELSE", "END", "ERRLVL", "ESCAPE", "EXCEPT", "EXEC", "EXECUTE",
-    "EXISTS", "EXIT", "EXTERNAL", "FETCH", "FILE", "FILLFACTOR", "FOR", "FOREIGN", "FREETEXT",
-    "FREETEXTTABLE", "FROM", "FULL", "FUNCTION", "GOTO", "GRANT", "GROUP", "HAVING", "HOLDLOCK",
-    "IDENTITY", "IDENTITY_INSERT", "IDENTITYCOL", "IF", "IN", "INDEX", "INNER", "INSERT", "INTERSECT",
-    "INTO", "IS", "JOIN", "KEY", "KILL", "LEFT", "LIKE", "LINENO", "LOAD", "MERGE", "NATIONAL", "NOCHECK",
-    "NONCLUSTERED", "NOT", "NULL", "NULLIF", "OF", "OFF", "OFFSETS", "ON", "OPEN", "OPENDATASOURCE",
-    "OPENQUERY", "OPENROWSET", "OPENXML", "OPTION", "OR", "ORDER", "OUTER", "OVER", "PERCENT", "PIVOT",
-    "PLAN", "PRECISION", "PRIMARY", "PRINT", "PROC", "PROCEDURE", "PUBLIC", "RAISERROR", "READ",
-    "READTEXT", "RECONFIGURE", "REFERENCES", "REPLICATION", "RESTORE", "RESTRICT", "RETURN", "REVERT",
-    "REVOKE", "RIGHT", "ROLLBACK", "ROWCOUNT", "ROWGUIDCOL", "RULE", "SAVE", "SCHEMA", "SECURITYAUDIT",
-    "SELECT", "SEMANTICKEYPHRASETABLE", "SEMANTICSIMILARITYDETAILSTABLE", "SEMANTICSIMILARITYTABLE",
-    "SESSION_USER", "SET", "SETUSER", "SHUTDOWN", "SOME", "STATISTICS", "SYSTEM_USER", "TABLE", "TABLESAMPLE",
-    "TEXTSIZE", "THEN", "TO", "TOP", "TRAN", "TRANSACTION", "TRIGGER", "TRUNCATE", "TRY_CONVERT",
-    "TSEQUAL", "UNION", "UNIQUE", "UNPIVOT", "UPDATE", "UPDATETEXT", "USE", "USER", "VALUES", "VARYING",
-    "VIEW", "WAITFOR", "WHEN", "WHERE", "WHILE", "WITH", "WITHIN GROUP", "WRITETEXT"
+    "ADD",
+    "ALL",
+    "ALTER",
+    "AND",
+    "ANY",
+    "AS",
+    "ASC",
+    "AUTHORIZATION",
+    "BACKUP",
+    "BEGIN",
+    "BETWEEN",
+    "BREAK",
+    "BROWSE",
+    "BULK",
+    "BY",
+    "CASCADE",
+    "CASE",
+    "CHECK",
+    "CHECKPOINT",
+    "CLOSE",
+    "CLUSTERED",
+    "COALESCE",
+    "COLUMN",
+    "COMMIT",
+    "COMPUTE",
+    "CONSTRAINT",
+    "CONTAINS",
+    "CONTAINSTABLE",
+    "CONTINUE",
+    "CONVERT",
+    "CREATE",
+    "CROSS",
+    "CURRENT",
+    "CURRENT_DATE",
+    "CURRENT_TIME",
+    "CURRENT_TIMESTAMP",
+    "CURRENT_USER",
+    "CURSOR",
+    "DATABASE",
+    "DBCC",
+    "DEALLOCATE",
+    "DECLARE",
+    "DEFAULT",
+    "DELETE",
+    "DENY",
+    "DESC",
+    "DISK",
+    "DISTINCT",
+    "DISTRIBUTED",
+    "DOUBLE",
+    "DROP",
+    "DUMP",
+    "ELSE",
+    "END",
+    "ERRLVL",
+    "ESCAPE",
+    "EXCEPT",
+    "EXEC",
+    "EXECUTE",
+    "EXISTS",
+    "EXIT",
+    "EXTERNAL",
+    "FETCH",
+    "FILE",
+    "FILLFACTOR",
+    "FOR",
+    "FOREIGN",
+    "FREETEXT",
+    "FREETEXTTABLE",
+    "FROM",
+    "FULL",
+    "FUNCTION",
+    "GOTO",
+    "GRANT",
+    "GROUP",
+    "HAVING",
+    "HOLDLOCK",
+    "IDENTITY",
+    "IDENTITY_INSERT",
+    "IDENTITYCOL",
+    "IF",
+    "IN",
+    "INDEX",
+    "INNER",
+    "INSERT",
+    "INTERSECT",
+    "INTO",
+    "IS",
+    "JOIN",
+    "KEY",
+    "KILL",
+    "LEFT",
+    "LIKE",
+    "LINENO",
+    "LOAD",
+    "MERGE",
+    "NATIONAL",
+    "NOCHECK",
+    "NONCLUSTERED",
+    "NOT",
+    "NULL",
+    "NULLIF",
+    "OF",
+    "OFF",
+    "OFFSETS",
+    "ON",
+    "OPEN",
+    "OPENDATASOURCE",
+    "OPENQUERY",
+    "OPENROWSET",
+    "OPENXML",
+    "OPTION",
+    "OR",
+    "ORDER",
+    "OUTER",
+    "OVER",
+    "PERCENT",
+    "PIVOT",
+    "PLAN",
+    "PRECISION",
+    "PRIMARY",
+    "PRINT",
+    "PROC",
+    "PROCEDURE",
+    "PUBLIC",
+    "RAISERROR",
+    "READ",
+    "READTEXT",
+    "RECONFIGURE",
+    "REFERENCES",
+    "REPLICATION",
+    "RESTORE",
+    "RESTRICT",
+    "RETURN",
+    "REVERT",
+    "REVOKE",
+    "RIGHT",
+    "ROLLBACK",
+    "ROWCOUNT",
+    "ROWGUIDCOL",
+    "RULE",
+    "SAVE",
+    "SCHEMA",
+    "SECURITYAUDIT",
+    "SELECT",
+    "SEMANTICKEYPHRASETABLE",
+    "SEMANTICSIMILARITYDETAILSTABLE",
+    "SEMANTICSIMILARITYTABLE",
+    "SESSION_USER",
+    "SET",
+    "SETUSER",
+    "SHUTDOWN",
+    "SOME",
+    "STATISTICS",
+    "SYSTEM_USER",
+    "TABLE",
+    "TABLESAMPLE",
+    "TEXTSIZE",
+    "THEN",
+    "TO",
+    "TOP",
+    "TRAN",
+    "TRANSACTION",
+    "TRIGGER",
+    "TRUNCATE",
+    "TRY_CONVERT",
+    "TSEQUAL",
+    "UNION",
+    "UNIQUE",
+    "UNPIVOT",
+    "UPDATE",
+    "UPDATETEXT",
+    "USE",
+    "USER",
+    "VALUES",
+    "VARYING",
+    "VIEW",
+    "WAITFOR",
+    "WHEN",
+    "WHERE",
+    "WHILE",
+    "WITH",
+    "WITHIN GROUP",
+    "WRITETEXT",
 }
+
 
 @dataclass
 class Column:
@@ -184,7 +348,7 @@ class Column:
 
     def validate_sql_column_name(self):
         if not (1 <= len(self.name) <= 128):
-            raise ValueError(f'Name {self.name} must be between 1 and 128')
+            raise ValueError(f"Name {self.name} must be between 1 and 128")
 
         def is_valid_string(s: str) -> bool:
             pattern = r"^[a-zA-ZåäöÅÄÖ0-9_]+$"
@@ -196,9 +360,11 @@ class Column:
             error_strings = [
                 "1. Must be between 1 and 128 characters.",
                 "2. Must be letters or underscores.",
-                "3. Cannot be a reserved keyword."
+                "3. Cannot be a reserved keyword.",
             ]
-            raise ValueError(f"Column name must fill criteria:\n{'\n'.join(error_strings)}\nThe selected name {self.name} is unfortunately one of {RESERVED_KEYWORDS} ")
+            raise ValueError(
+                f"Column name must fill criteria:\n{'\n'.join(error_strings)}\nThe selected name {self.name} is unfortunately one of {RESERVED_KEYWORDS} "
+            )
 
     def validate_types(self):
         if not isinstance(self.data_type, DataType):

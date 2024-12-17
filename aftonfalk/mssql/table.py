@@ -171,16 +171,15 @@ class Table:
         def _generate_column_python_code(col: Column, dt_string: str) -> str:
             constraints = f", constraints='{col.constraints}'"
             if not col.constraints:
-                constraints=""
+                constraints = ""
 
             description = f", description='{col.description}'"
             if not col.description:
-                description=""
+                description = ""
 
             sensitive = f", sensitive='{col.sensitive}'"
             if not col.sensitive:
-                sensitive=""
-
+                sensitive = ""
 
             return f"Column(name='{col.name}', data_type={dt_string}{constraints}{description}{sensitive})"
 
@@ -201,9 +200,16 @@ class Table:
             columns_list = []
             for col in value:
                 for column_attribute_key, column_attribute_value in vars(col).items():
-                    if column_attribute_key == "data_type" and type(column_attribute_value) == DataType:
-                        dt_string = _generate_data_type_python_code(dt=column_attribute_value)
-                        column_string = _generate_column_python_code(col=col, dt_string=dt_string)
+                    if (
+                        column_attribute_key == "data_type"
+                        and type(column_attribute_value) == DataType
+                    ):
+                        dt_string = _generate_data_type_python_code(
+                            dt=column_attribute_value
+                        )
+                        column_string = _generate_column_python_code(
+                            col=col, dt_string=dt_string
+                        )
                         columns_list.append(f"{column_string}")
             return f"{key}=[\n{",\n".join(columns_list)}\n]"
 
@@ -211,7 +217,9 @@ class Table:
             index_list = []
             for index in self.indexes:
                 index_list.append(f"Index(\nSqlServerIndexType.{index.index_type.name}")
-                index_list.append(f"{_create_columns_list(key="columns", value=index.columns)}")
+                index_list.append(
+                    f"{_create_columns_list(key="columns", value=index.columns)}"
+                )
                 index_list.append(f"is_unique={index.is_unique}")
                 index_list.append(f"sort_direction={index.sort_direction}\n)")
             return ",\n".join(index_list)
@@ -226,8 +234,14 @@ class Table:
         }
 
         paths = []
-        paths.append(_generate_path_python_code(prefix="source_path", path=self.source_path))
-        paths.append(_generate_path_python_code(prefix="destination_path", path=self.destination_path))
+        paths.append(
+            _generate_path_python_code(prefix="source_path", path=self.source_path)
+        )
+        paths.append(
+            _generate_path_python_code(
+                prefix="destination_path", path=self.destination_path
+            )
+        )
 
         all_columns = []
         for key, value in attributes.items():
@@ -253,8 +267,12 @@ class Table:
         properties_lines = []
         properties_lines.extend(all_columns)
         properties_lines.append(",\n".join(paths))
-        properties_lines.append(f"source_data_modified_column_name='{self.source_data_modified_column_name}'")
-        properties_lines.append(f"destination_data_modified_column_name='{self.destination_data_modified_column_name}'")
+        properties_lines.append(
+            f"source_data_modified_column_name='{self.source_data_modified_column_name}'"
+        )
+        properties_lines.append(
+            f"destination_data_modified_column_name='{self.destination_data_modified_column_name}'"
+        )
         properties_lines.append(f"temp_table_schema='{self.temp_table_schema}'")
         properties_lines.append(f"enforce_primary_key={self.enforce_primary_key}")
         properties_lines.append(f"timezone={self.timezone}")

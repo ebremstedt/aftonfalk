@@ -23,13 +23,15 @@ class MssqlDriver:
             dsn=dsn,
             trust_server_certificate=trust_server_certificate,
             driver=driver,
-            encrypt=encrypt
+            encrypt=encrypt,
         )
         self.conn = pyodbc.connect(connection_string)
 
-    def _connection_string(self, dsn: str, driver: str, trust_server_certificate: bool, encrypt: bool) -> str:
+    def _connection_string(
+        self, dsn: str, driver: str, trust_server_certificate: bool, encrypt: bool
+    ) -> str:
         parsed = urlparse(dsn)
-        technology = parsed.scheme # noqa # ignore
+        technology = parsed.scheme  # noqa # ignore
         user = unquote(parsed.username) if parsed.username else None
         password = unquote(parsed.password) if parsed.password else None
         hostname = parsed.hostname
@@ -137,7 +139,6 @@ class MssqlDriver:
                 except Exception as e:
                     raise Exception(f"Writing failed using query\n{sql}") from e
 
-
     def create_schema_in_one_go(self, path: Path):
         """Pyodbc cant have these two statements in one go, so we have to execute them to the cursor separately"""
         with self.conn.cursor() as cursor:
@@ -153,13 +154,8 @@ class MssqlDriver:
         if not table.unique_columns or not update_columns:
             raise ValueError("Unique columns and update columns cannot be empty.")
 
-        on_conditions = (
-            " AND ".join(
-                [
-                    f"target.{col.name} = source.{col.name}"
-                    for col in table.unique_columns
-                ]
-            )
+        on_conditions = " AND ".join(
+            [f"target.{col.name} = source.{col.name}" for col in table.unique_columns]
         )
         update_clause = ", ".join(
             [f"target.{col.name} = source.{col.name}" for col in update_columns]

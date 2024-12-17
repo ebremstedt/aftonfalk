@@ -20,12 +20,24 @@ class Path:
         if not part:
             raise ValueError("Name cannot be empty")
 
-        pattern = r'^[a-zA-Z0-9_]+$'
+        pattern = r"^[a-zA-Z0-9_]+$"
         if not re.match(pattern, part):
-            raise ValueError(f"Name '{part}' must contain only letters, numbers, or underscores")
+            raise ValueError(
+                f"Name '{part}' must contain only letters, numbers, or underscores"
+            )
+
+    @staticmethod
+    def validate_table(table: str):
+        if not table:
+            raise ValueError("Name cannot be empty")
+
+        pattern = r"^#?[a-zA-Z0-9_]+$"
+        if not re.match(pattern, table):
+            raise ValueError(
+                f"Table '{table}' must contain only letters, numbers, or underscores. It can however, start with #"
+            )
 
     def __post_init__(self):
-        # Static method can be called without `self`
         Path.validate_part(self.database)
         Path.validate_part(self.schema)
-        Path.validate_part(self.table)
+        Path.validate_table(self.table)
