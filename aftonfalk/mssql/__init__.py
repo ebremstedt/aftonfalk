@@ -1,4 +1,9 @@
-from aftonfalk.mssql.column import Column, DataType, SqlServerDataType, RESERVED_KEYWORDS
+from aftonfalk.mssql.column import (
+    Column,
+    DataType,
+    SqlServerDataType,
+    RESERVED_KEYWORDS,
+)
 from aftonfalk.mssql.driver import MssqlDriver
 from aftonfalk.mssql.index import Index, SqlServerIndexType, SortDirection
 from aftonfalk.mssql.path import Path, InvalidPathException
