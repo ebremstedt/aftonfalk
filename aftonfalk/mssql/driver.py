@@ -18,17 +18,19 @@ class MssqlDriver:
         driver: Optional[str] = "ODBC Driver 18 for SQL Server",
         trust_server_certificate: bool = True,
         encrypt: bool = False,
+        mars: bool = False
     ):
         connection_string = self._connection_string(
             dsn=dsn,
             trust_server_certificate=trust_server_certificate,
             driver=driver,
             encrypt=encrypt,
+            mars=mars
         )
         self.conn = pyodbc.connect(connection_string)
 
     def _connection_string(
-        self, dsn: str, driver: str, trust_server_certificate: bool, encrypt: bool
+        self, dsn: str, driver: str, trust_server_certificate: bool, encrypt: bool, mars: bool
     ) -> str:
         parsed = urlparse(dsn)
         technology = parsed.scheme  # noqa # ignore
@@ -37,17 +39,12 @@ class MssqlDriver:
         hostname = parsed.hostname
         port = parsed.port
 
-        trust_server_certificate_str = ""
-        if trust_server_certificate:
-            trust_server_certificate_str = "TrustServerCertificate=yes;"
+        trust_server_certificate_str = "TrustServerCertificate=yes;" if trust_server_certificate else ""
+        mars_str = "MARS=True;" if mars else ""
+        encrypt_str = "Encrypt=no;" if not encrypt else ""
 
-        encrypt_str = ""
-        if not encrypt:
-            encrypt_str = "Encrypt=no;"
+        return f"DRIVER={driver};SERVER={hostname},{port};UID={user};PWD={password};{trust_server_certificate_str}{mars_str}{encrypt_str}"
 
-            return f"DRIVER={driver};SERVER={hostname},{port};UID={user};PWD={password};{trust_server_certificate_str}{encrypt_str}"
-        else:
-            raise ValueError("Invalid DSN format")
 
     def handle_datetimeoffset(self, dto_value):
         # ref: https://github.com/mkleehammer/pyodbc/issues/134#issuecomment-281739794
