@@ -40,7 +40,7 @@ class MssqlDriver:
         port = parsed.port
 
         trust_server_certificate_str = "TrustServerCertificate=yes;" if trust_server_certificate else ""
-        mars_str = "MARS=True;" if mars else ""
+        mars_str = "MultipleActiveResultSets=True;" if mars else ""
         encrypt_str = "Encrypt=no;" if not encrypt else ""
 
         return f"DRIVER={driver};SERVER={hostname},{port};UID={user};PWD={password};{trust_server_certificate_str}{mars_str}{encrypt_str}"
