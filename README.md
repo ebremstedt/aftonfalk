@@ -96,6 +96,7 @@ creating tables
 driver.create_table(path=table.destination_path, ddl=table.table_ddl())
 ```
 
+
 inserting into tables
 ```python
 data = ...
